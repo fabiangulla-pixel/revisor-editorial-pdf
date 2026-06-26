@@ -6,23 +6,24 @@ Motor principal: Ollama local (sin tokens). APIs opcionales.
 Gulla Editorial Tools
 """
 
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
-import threading
-import json
 import csv
+import json
 import os
-import sys
-import time
-import requests
 import re
+import sys
+import threading
+import time
+import tkinter as tk
 import xml.etree.ElementTree as ET
-from xml.dom import minidom
-from pathlib import Path
-from datetime import datetime
 from abc import ABC, abstractmethod
-from dotenv import load_dotenv
+from datetime import datetime
+from pathlib import Path
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+from xml.dom import minidom
+
 import fitz  # PyMuPDF
+import requests
+from dotenv import load_dotenv
 
 # Cargar .env de forma tolerante: en unidades de red / Google Drive la lectura
 # puede lanzar OSError. No debe impedir la importación del módulo ni los tests.
@@ -228,6 +229,7 @@ Si la página está bien, devuelve hallazgos vacíos. Solo JSON."""
 # PERFIL DE ESTILO
 # ───────────────────────────────────────────────────────────────────────────────
 
+
 class PerfilEstilo:
     """Maneja la carga, parseo e inyección del perfil de estilo editorial."""
 
@@ -351,8 +353,8 @@ class PerfilEstilo:
 # PROVEEDORES LLM
 # ───────────────────────────────────────────────────────────────────────────────
 
-class ProveedorLLM(ABC):
 
+class ProveedorLLM(ABC):
     @abstractmethod
     def analizar(self, prompt_usuario: str, pagina: int, sistema: str) -> dict:
         pass
@@ -379,7 +381,6 @@ class ProveedorLLM(ABC):
 
 
 class OllamaLocal(ProveedorLLM):
-
     def __init__(self, modelo: str = "llama3.1", url: str = "http://localhost:11434"):
         self.modelo = modelo
         self.url = url.rstrip("/")
@@ -392,7 +393,10 @@ class OllamaLocal(ProveedorLLM):
                 if not modelos:
                     return False, "Ollama activo pero sin modelos. Ejecuta: ollama pull llama3.1"
                 if not any(self.modelo in m for m in modelos):
-                    return False, f"Modelo '{self.modelo}' no disponible. Disponibles: {', '.join(modelos[:4])}"
+                    return (
+                        False,
+                        f"Modelo '{self.modelo}' no disponible. Disponibles: {', '.join(modelos[:4])}",
+                    )
                 return True, f"Ollama OK · {len(modelos)} modelo(s) · sin tokens"
             return False, f"Ollama respondió {r.status_code}"
         except requests.exceptions.ConnectionError:
@@ -426,9 +430,9 @@ class OllamaLocal(ProveedorLLM):
 
 
 class OpenAIProveedor(ProveedorLLM):
-
     def __init__(self, api_key: str, modelo: str = "gpt-4o"):
         import openai
+
         self.cliente = openai.OpenAI(api_key=api_key)
         self.modelo = modelo
 
@@ -457,9 +461,9 @@ class OpenAIProveedor(ProveedorLLM):
 
 
 class GeminiProveedor(ProveedorLLM):
-
     def __init__(self, api_key: str, modelo: str = "gemini-2.0-flash"):
         import google.generativeai as genai
+
         self._genai = genai
         self._api_key = api_key
         self.modelo = modelo
@@ -469,7 +473,7 @@ class GeminiProveedor(ProveedorLLM):
         return self._genai.GenerativeModel(
             model_name=self.modelo,
             system_instruction=sistema,
-            generation_config={"temperature": 0.1, "max_output_tokens": 4000}
+            generation_config={"temperature": 0.1, "max_output_tokens": 4000},
         )
 
     def verificar_conexion(self) -> tuple:
@@ -490,17 +494,19 @@ class GeminiProveedor(ProveedorLLM):
 
 
 class ClaudeProveedor(ProveedorLLM):
-
     def __init__(self, api_key: str, modelo: str = "claude-sonnet-4-6"):
         import anthropic
+
         self.cliente = anthropic.Anthropic(api_key=api_key)
         self.modelo = modelo
 
     def verificar_conexion(self) -> tuple:
         try:
             self.cliente.messages.create(
-                model=self.modelo, max_tokens=5,
-                system="ok", messages=[{"role": "user", "content": "ok"}]
+                model=self.modelo,
+                max_tokens=5,
+                system="ok",
+                messages=[{"role": "user", "content": "ok"}],
             )
             return True, f"Claude OK · modelo: {self.modelo}"
         except Exception as e:
@@ -508,9 +514,10 @@ class ClaudeProveedor(ProveedorLLM):
 
     def analizar(self, prompt_usuario: str, pagina: int, sistema: str) -> dict:
         resp = self.cliente.messages.create(
-            model=self.modelo, max_tokens=4000,
+            model=self.modelo,
+            max_tokens=4000,
             system=sistema,
-            messages=[{"role": "user", "content": prompt_usuario}]
+            messages=[{"role": "user", "content": prompt_usuario}],
         )
         resultado = self._limpiar_json(resp.content[0].text)
         resultado.setdefault("pagina", pagina)
@@ -519,7 +526,6 @@ class ClaudeProveedor(ProveedorLLM):
 
 
 class PerplexityProveedor(ProveedorLLM):
-
     def __init__(self, api_key: str, modelo: str = "sonar-pro"):
         self.api_key = api_key
         self.modelo = modelo
@@ -530,11 +536,18 @@ class PerplexityProveedor(ProveedorLLM):
             resp = requests.post(
                 self.url,
                 headers={"Authorization": f"Bearer {self.api_key}"},
-                json={"model": self.modelo, "messages": [{"role": "user", "content": "ok"}], "max_tokens": 5},
+                json={
+                    "model": self.modelo,
+                    "messages": [{"role": "user", "content": "ok"}],
+                    "max_tokens": 5,
+                },
                 timeout=15,
             )
-            return (True, f"Perplexity OK · modelo: {self.modelo}") if resp.status_code == 200 \
-                   else (False, f"Perplexity error {resp.status_code}")
+            return (
+                (True, f"Perplexity OK · modelo: {self.modelo}")
+                if resp.status_code == 200
+                else (False, f"Perplexity error {resp.status_code}")
+            )
         except Exception as e:
             return False, f"Perplexity error: {e}"
 
@@ -548,7 +561,8 @@ class PerplexityProveedor(ProveedorLLM):
                     {"role": "system", "content": sistema},
                     {"role": "user", "content": prompt_usuario},
                 ],
-                "max_tokens": 4000, "temperature": 0.1,
+                "max_tokens": 4000,
+                "temperature": 0.1,
             },
             timeout=120,
         )
@@ -563,8 +577,8 @@ class PerplexityProveedor(ProveedorLLM):
 # ANÁLISIS Y ANOTACIÓN DE PDF
 # ───────────────────────────────────────────────────────────────────────────────
 
-class AnalizadorPDF:
 
+class AnalizadorPDF:
     def __init__(self, ruta: str):
         self.ruta = ruta
         self.doc = fitz.open(ruta)
@@ -583,7 +597,9 @@ class AnalizadorPDF:
 
         # Método principal: dict con spans (preserva info tipográfica)
         try:
-            raw = pagina.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_PRESERVE_LIGATURES)
+            raw = pagina.get_text(
+                "dict", flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_PRESERVE_LIGATURES
+            )
             for bloque in raw.get("blocks", []):
                 if bloque.get("type") != 0:
                     continue
@@ -594,15 +610,19 @@ class AnalizadorPDF:
                             continue
                         flags = span.get("flags", 0)
                         atrs = []
-                        if flags & 16: atrs.append("negrita")
-                        if flags & 2:  atrs.append("cursiva")
-                        bloques_texto.append({
-                            "texto": texto,
-                            "bbox": list(span["bbox"]),
-                            "fuente": span.get("font", ""),
-                            "tamanio": round(span.get("size", 0), 1),
-                            "atributos": atrs,
-                        })
+                        if flags & 16:
+                            atrs.append("negrita")
+                        if flags & 2:
+                            atrs.append("cursiva")
+                        bloques_texto.append(
+                            {
+                                "texto": texto,
+                                "bbox": list(span["bbox"]),
+                                "fuente": span.get("font", ""),
+                                "tamanio": round(span.get("size", 0), 1),
+                                "atributos": atrs,
+                            }
+                        )
                         texto_partes.append(texto)
         except Exception:
             pass
@@ -613,13 +633,15 @@ class AnalizadorPDF:
             if texto_simple:
                 for linea in texto_simple.splitlines():
                     if linea.strip():
-                        bloques_texto.append({
-                            "texto": linea,
-                            "bbox": [0, 0, pagina.rect.width, pagina.rect.height],
-                            "fuente": "",
-                            "tamanio": 0,
-                            "atributos": [],
-                        })
+                        bloques_texto.append(
+                            {
+                                "texto": linea,
+                                "bbox": [0, 0, pagina.rect.width, pagina.rect.height],
+                                "fuente": "",
+                                "tamanio": 0,
+                                "atributos": [],
+                            }
+                        )
                         texto_partes.append(linea)
 
         return {
@@ -660,23 +682,29 @@ class AnalizadorPDF:
 # ── Anotación de PDF ───────────────────────────────────────────────────────────
 
 COLORES_MUF = {
-    "critica":    (0.90, 0.15, 0.15),
+    "critica": (0.90, 0.15, 0.15),
     "importante": (0.95, 0.55, 0.10),
-    "menor":      (0.20, 0.65, 0.20),
+    "menor": (0.20, 0.65, 0.20),
 }
 COLORES_FONDO_MUF = {
-    "critica":    (1.0, 0.75, 0.75),
+    "critica": (1.0, 0.75, 0.75),
     "importante": (1.0, 0.92, 0.70),
-    "menor":      (0.85, 0.95, 0.80),
+    "menor": (0.85, 0.95, 0.80),
 }
 COLORES_HEX = {
-    "critica": "#E62525", "importante": "#F28A1A", "menor": "#3AAA35",
+    "critica": "#E62525",
+    "importante": "#F28A1A",
+    "menor": "#3AAA35",
 }
 ASUNTOS = {
-    "ortotipografia": "Ortotipografía", "composicion_tipografica": "Composición",
-    "jerarquia_visual": "Jerarquía visual", "paginacion": "Paginación",
-    "arquitectura_pagina": "Arquitectura de página", "imagenes_tablas": "Imágenes/Tablas",
-    "riesgo_tecnico": "Riesgo técnico", "preliminares_finales": "Preliminares/Finales",
+    "ortotipografia": "Ortotipografía",
+    "composicion_tipografica": "Composición",
+    "jerarquia_visual": "Jerarquía visual",
+    "paginacion": "Paginación",
+    "arquitectura_pagina": "Arquitectura de página",
+    "imagenes_tablas": "Imágenes/Tablas",
+    "riesgo_tecnico": "Riesgo técnico",
+    "preliminares_finales": "Preliminares/Finales",
 }
 
 
@@ -733,8 +761,14 @@ def anotar_pdf(ruta_original: str, hallazgos: list, ruta_salida: str, autor: str
             if tipo in mapa:
                 annot = mapa[tipo](quad)
                 annot.set_colors(stroke=color)
-                annot.set_info({"title": f"[{gravedad.upper()}]", "subject": asunto,
-                                "content": contenido, "creator": autor})
+                annot.set_info(
+                    {
+                        "title": f"[{gravedad.upper()}]",
+                        "subject": asunto,
+                        "content": contenido,
+                        "creator": autor,
+                    }
+                )
                 annot.update()
             else:
                 rect = quad.rect
@@ -742,7 +776,9 @@ def anotar_pdf(ruta_original: str, hallazgos: list, ruta_salida: str, autor: str
                 px = min(rect.x1 + 8, ancho_pag - 20)
                 annot = pagina.add_text_annot(fitz.Point(px, rect.y0), contenido)
                 annot.set_colors(stroke=color, fill=color_fondo)
-                annot.set_info({"title": f"[{gravedad.upper()}]", "subject": asunto, "creator": autor})
+                annot.set_info(
+                    {"title": f"[{gravedad.upper()}]", "subject": asunto, "creator": autor}
+                )
                 annot.update()
         else:
             # Sin ubicación: distribuir en margen derecho, 24 px entre notas, sin salirse de página
@@ -752,7 +788,13 @@ def anotar_pdf(ruta_original: str, hallazgos: list, ruta_salida: str, autor: str
             y = min(20 + n * 24, alto_pag - 22)
             annot = pagina.add_text_annot(fitz.Point(x, y), contenido)
             annot.set_colors(stroke=color, fill=color_fondo)
-            annot.set_info({"title": f"[{gravedad.upper()}] Pág.{num_pag}", "subject": asunto, "creator": autor})
+            annot.set_info(
+                {
+                    "title": f"[{gravedad.upper()}] Pág.{num_pag}",
+                    "subject": asunto,
+                    "creator": autor,
+                }
+            )
             annot.update()
 
     doc.save(ruta_salida, garbage=4, deflate=True)
@@ -764,8 +806,11 @@ def generar_xfdf(ruta_original: str, hallazgos: list, ruta_salida: str, autor: s
     xfdf = ET.Element("xfdf", {"xmlns": "http://ns.adobe.com/xfdf/", "xml:space": "preserve"})
     annots = ET.SubElement(xfdf, "annots")
     tipos_xfdf = {
-        "nota_adhesiva": "text", "tachado": "strikeout",
-        "subrayado_ondulado": "squiggly", "resaltado": "highlight", "subrayado": "underline",
+        "nota_adhesiva": "text",
+        "tachado": "strikeout",
+        "subrayado_ondulado": "squiggly",
+        "resaltado": "highlight",
+        "subrayado": "underline",
     }
 
     notas_sin_pos_xfdf: dict[int, int] = {}
@@ -806,18 +851,26 @@ def generar_xfdf(ruta_original: str, hallazgos: list, ruta_salida: str, autor: s
         rect_str = f"{x0:.2f},{alto - y1:.2f},{x1:.2f},{alto - y0:.2f}"
 
         attrs = {
-            "page": str(idx), "rect": rect_str, "color": color_hex,
-            "author": autor, "subject": asunto,
+            "page": str(idx),
+            "rect": rect_str,
+            "color": color_hex,
+            "author": autor,
+            "subject": asunto,
             "title": f"[{gravedad.upper()}] {asunto}",
-            "contents": contenido, "name": h.get("id", f"a{i}"),
+            "contents": contenido,
+            "name": h.get("id", f"a{i}"),
             "date": datetime.now().strftime("D:%Y%m%d%H%M%S"),
         }
         annot_el = ET.SubElement(annots, tipo_xfdf, attrs)
 
         if tipo_xfdf in ("highlight", "strikeout", "squiggly", "underline") and quads:
             q = quads[0]
-            pts = [(q.ul.x, alto - q.ul.y), (q.ur.x, alto - q.ur.y),
-                   (q.ll.x, alto - q.ll.y), (q.lr.x, alto - q.lr.y)]
+            pts = [
+                (q.ul.x, alto - q.ul.y),
+                (q.ur.x, alto - q.ur.y),
+                (q.ll.x, alto - q.ll.y),
+                (q.lr.x, alto - q.lr.y),
+            ]
             annot_el.set("coords", ",".join(f"{x:.2f},{y:.2f}" for x, y in pts))
 
     doc.close()
@@ -827,9 +880,15 @@ def generar_xfdf(ruta_original: str, hallazgos: list, ruta_salida: str, autor: s
         f.write(xml_bonito)
 
 
-def generar_informes(hallazgos: list, nombre_pdf: str, dir_salida: str,
-                     nombre_corrector: str = "", nombre_perfil: str = ""):
+def generar_informes(
+    hallazgos: list,
+    nombre_pdf: str,
+    dir_salida: str,
+    nombre_corrector: str = "",
+    nombre_perfil: str = "",
+):
     from collections import Counter
+
     fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
     total = len(hallazgos)
     por_gravedad = Counter(h.get("gravedad", "menor") for h in hallazgos)
@@ -848,7 +907,7 @@ def generar_informes(hallazgos: list, nombre_pdf: str, dir_salida: str,
         dictamen = "**Aprobable sin cambios**"
 
     lineas = [
-        f"# Informe de lectura de prueba",
+        "# Informe de lectura de prueba",
         f"**Archivo:** {nombre_pdf} | **Fecha:** {fecha} | **Total hallazgos:** {total}",
     ]
     if nombre_corrector:
@@ -856,15 +915,25 @@ def generar_informes(hallazgos: list, nombre_pdf: str, dir_salida: str,
     if nombre_perfil:
         lineas.append(f"**Perfil de estilo:** {nombre_perfil}")
 
-    lineas += ["", f"## Dictamen final", "", dictamen, "",
-               "## Distribución", "",
-               "| Gravedad | N | Categoría | N |", "|---|---|---|---|"]
+    lineas += [
+        "",
+        "## Dictamen final",
+        "",
+        dictamen,
+        "",
+        "## Distribución",
+        "",
+        "| Gravedad | N | Categoría | N |",
+        "|---|---|---|---|",
+    ]
 
     gravedades = [("critica", "Crítica"), ("importante", "Importante"), ("menor", "Menor")]
     cats = list(por_categoria.most_common(3))
     for i, (gk, gl) in enumerate(gravedades):
         ck, cv = cats[i] if i < len(cats) else ("", 0)
-        lineas.append(f"| {gl} | {por_gravedad.get(gk, 0)} | {ck.replace('_',' ').capitalize()} | {cv} |")
+        lineas.append(
+            f"| {gl} | {por_gravedad.get(gk, 0)} | {ck.replace('_', ' ').capitalize()} | {cv} |"
+        )
 
     lineas += ["", "## Hallazgos por página", ""]
     for pag in sorted(set(h.get("pagina", 0) for h in hallazgos)):
@@ -882,8 +951,18 @@ def generar_informes(hallazgos: list, nombre_pdf: str, dir_salida: str,
     ruta_md = Path(dir_salida) / "01_informe_maestro.md"
     ruta_md.write_text("\n".join(lineas), encoding="utf-8")
 
-    campos = ["pagina", "id", "tipo_anotacion", "categoria", "gravedad",
-              "certeza", "autoaplicable", "fragmento", "descripcion", "correccion"]
+    campos = [
+        "pagina",
+        "id",
+        "tipo_anotacion",
+        "categoria",
+        "gravedad",
+        "certeza",
+        "autoaplicable",
+        "fragmento",
+        "descripcion",
+        "correccion",
+    ]
     ruta_csv = Path(dir_salida) / "02_hallazgos.csv"
     with open(ruta_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=campos, extrasaction="ignore")
@@ -900,8 +979,8 @@ def generar_informes(hallazgos: list, nombre_pdf: str, dir_salida: str,
 # INTERFAZ TKINTER
 # ───────────────────────────────────────────────────────────────────────────────
 
-class AppCorrector(tk.Tk):
 
+class AppCorrector(tk.Tk):
     PROVEEDORES = ["Ollama (local — sin tokens)", "OpenAI", "Gemini", "Claude", "Perplexity"]
 
     def __init__(self):
@@ -911,14 +990,14 @@ class AppCorrector(tk.Tk):
         self.minsize(860, 600)
         self.configure(bg="#1e1e2e")
 
-        self.ruta_pdf        = tk.StringVar()
-        self.proveedor_sel   = tk.StringVar(value=self.PROVEEDORES[0])
-        self.modelo_ollama   = tk.StringVar(value="llama3.1")
-        self.key_openai      = tk.StringVar()
-        self.key_gemini      = tk.StringVar()
-        self.key_claude      = tk.StringVar()
-        self.key_perplexity  = tk.StringVar()
-        self.autor           = tk.StringVar(value="Corrector IA")
+        self.ruta_pdf = tk.StringVar()
+        self.proveedor_sel = tk.StringVar(value=self.PROVEEDORES[0])
+        self.modelo_ollama = tk.StringVar(value="llama3.1")
+        self.key_openai = tk.StringVar()
+        self.key_gemini = tk.StringVar()
+        self.key_claude = tk.StringVar()
+        self.key_perplexity = tk.StringVar()
+        self.autor = tk.StringVar(value="Corrector IA")
 
         self.perfil = PerfilEstilo()
         self.hallazgos: list = []
@@ -961,27 +1040,68 @@ class AppCorrector(tk.Tk):
         s = ttk.Style()
         s.theme_use("clam")
         s.configure("TNotebook", background="#1e1e2e", borderwidth=0)
-        s.configure("TNotebook.Tab", background="#2d2d3e", foreground="#cdd6f4",
-                    padding=[14, 6], font=("Segoe UI", 10))
-        s.map("TNotebook.Tab", background=[("selected", "#313244")],
-              foreground=[("selected", "#cba6f7")])
+        s.configure(
+            "TNotebook.Tab",
+            background="#2d2d3e",
+            foreground="#cdd6f4",
+            padding=[14, 6],
+            font=("Segoe UI", 10),
+        )
+        s.map(
+            "TNotebook.Tab",
+            background=[("selected", "#313244")],
+            foreground=[("selected", "#cba6f7")],
+        )
         s.configure("TFrame", background="#1e1e2e")
         s.configure("TLabel", background="#1e1e2e", foreground="#cdd6f4", font=("Segoe UI", 10))
-        s.configure("TEntry", fieldbackground="#313244", foreground="#cdd6f4",
-                    insertcolor="#cba6f7", borderwidth=0)
-        s.configure("TButton", background="#313244", foreground="#cdd6f4",
-                    font=("Segoe UI", 10), borderwidth=0, padding=[10, 5])
+        s.configure(
+            "TEntry",
+            fieldbackground="#313244",
+            foreground="#cdd6f4",
+            insertcolor="#cba6f7",
+            borderwidth=0,
+        )
+        s.configure(
+            "TButton",
+            background="#313244",
+            foreground="#cdd6f4",
+            font=("Segoe UI", 10),
+            borderwidth=0,
+            padding=[10, 5],
+        )
         s.map("TButton", background=[("active", "#45475a")], foreground=[("active", "#cba6f7")])
-        s.configure("Accent.TButton", background="#cba6f7", foreground="#1e1e2e",
-                    font=("Segoe UI", 10, "bold"), borderwidth=0, padding=[12, 6])
+        s.configure(
+            "Accent.TButton",
+            background="#cba6f7",
+            foreground="#1e1e2e",
+            font=("Segoe UI", 10, "bold"),
+            borderwidth=0,
+            padding=[12, 6],
+        )
         s.map("Accent.TButton", background=[("active", "#b4befe")])
-        s.configure("Perfil.TButton", background="#1e6b45", foreground="#e0fef0",
-                    font=("Segoe UI", 10, "bold"), borderwidth=0, padding=[10, 5])
+        s.configure(
+            "Perfil.TButton",
+            background="#1e6b45",
+            foreground="#e0fef0",
+            font=("Segoe UI", 10, "bold"),
+            borderwidth=0,
+            padding=[10, 5],
+        )
         s.map("Perfil.TButton", background=[("active", "#2d9e68")])
-        s.configure("Treeview", background="#313244", fieldbackground="#313244",
-                    foreground="#cdd6f4", font=("Segoe UI", 9), rowheight=22)
-        s.configure("Treeview.Heading", background="#45475a", foreground="#cba6f7",
-                    font=("Segoe UI", 9, "bold"))
+        s.configure(
+            "Treeview",
+            background="#313244",
+            fieldbackground="#313244",
+            foreground="#cdd6f4",
+            font=("Segoe UI", 9),
+            rowheight=22,
+        )
+        s.configure(
+            "Treeview.Heading",
+            background="#45475a",
+            foreground="#cba6f7",
+            font=("Segoe UI", 9, "bold"),
+        )
         s.configure("TCombobox", fieldbackground="#313244", foreground="#cdd6f4")
         s.configure("TLabelframe", background="#1e1e2e", foreground="#6c7086")
         s.configure("TLabelframe.Label", background="#1e1e2e", foreground="#6c7086")
@@ -993,32 +1113,35 @@ class AppCorrector(tk.Tk):
         header = tk.Frame(self, bg="#313244", height=52)
         header.pack(fill="x")
         header.pack_propagate(False)
-        tk.Label(header, text="Corrector Editorial PDF",
-                 bg="#313244", fg="#cba6f7",
-                 font=("Segoe UI", 15, "bold")).pack(side="left", padx=20, pady=12)
+        tk.Label(
+            header,
+            text="Corrector Editorial PDF",
+            bg="#313244",
+            fg="#cba6f7",
+            font=("Segoe UI", 15, "bold"),
+        ).pack(side="left", padx=20, pady=12)
 
         self.lbl_header_perfil = tk.Label(
-            header, text="◸ Sin perfil de estilo",
-            bg="#313244", fg="#6c7086", font=("Segoe UI", 9)
+            header, text="◸ Sin perfil de estilo", bg="#313244", fg="#6c7086", font=("Segoe UI", 9)
         )
         self.lbl_header_perfil.pack(side="left", padx=12)
 
         nb = ttk.Notebook(self)
         nb.pack(fill="both", expand=True, padx=8, pady=8)
 
-        tab_revision     = ttk.Frame(nb)
-        tab_config       = ttk.Frame(nb)
-        tab_estilo       = ttk.Frame(nb)
-        tab_hallazgos    = ttk.Frame(nb)
-        tab_entregables  = ttk.Frame(nb)
-        tab_log          = ttk.Frame(nb)
+        tab_revision = ttk.Frame(nb)
+        tab_config = ttk.Frame(nb)
+        tab_estilo = ttk.Frame(nb)
+        tab_hallazgos = ttk.Frame(nb)
+        tab_entregables = ttk.Frame(nb)
+        tab_log = ttk.Frame(nb)
 
-        nb.add(tab_revision,    text="  Revisión  ")
-        nb.add(tab_config,      text="  Configuración  ")
-        nb.add(tab_estilo,      text="  ◆ Perfil de estilo  ")
-        nb.add(tab_hallazgos,   text="  Hallazgos  ")
+        nb.add(tab_revision, text="  Revisión  ")
+        nb.add(tab_config, text="  Configuración  ")
+        nb.add(tab_estilo, text="  ◆ Perfil de estilo  ")
+        nb.add(tab_hallazgos, text="  Hallazgos  ")
         nb.add(tab_entregables, text="  Entregables  ")
-        nb.add(tab_log,         text="  Log  ")
+        nb.add(tab_log, text="  Log  ")
 
         self._tab_revision(tab_revision)
         self._tab_config(tab_config)
@@ -1036,7 +1159,9 @@ class AppCorrector(tk.Tk):
         lf_pdf.pack(fill="x", **pad)
         row = ttk.Frame(lf_pdf)
         row.pack(fill="x", padx=10, pady=8)
-        ttk.Entry(row, textvariable=self.ruta_pdf, width=60).pack(side="left", fill="x", expand=True)
+        ttk.Entry(row, textvariable=self.ruta_pdf, width=60).pack(
+            side="left", fill="x", expand=True
+        )
         ttk.Button(row, text="Examinar…", command=self._elegir_pdf).pack(side="left", padx=(8, 0))
 
         lf_motor = ttk.LabelFrame(parent, text="Motor de análisis")
@@ -1044,8 +1169,13 @@ class AppCorrector(tk.Tk):
         row2 = ttk.Frame(lf_motor)
         row2.pack(fill="x", padx=10, pady=8)
         ttk.Label(row2, text="Proveedor:").pack(side="left")
-        cb = ttk.Combobox(row2, textvariable=self.proveedor_sel,
-                          values=self.PROVEEDORES, state="readonly", width=30)
+        cb = ttk.Combobox(
+            row2,
+            textvariable=self.proveedor_sel,
+            values=self.PROVEEDORES,
+            state="readonly",
+            width=30,
+        )
         cb.pack(side="left", padx=(8, 16))
         self.lbl_estado_motor = ttk.Label(row2, text="", foreground="#a6e3a1")
         self.lbl_estado_motor.pack(side="left")
@@ -1056,13 +1186,12 @@ class AppCorrector(tk.Tk):
         row3 = ttk.Frame(lf_perfil)
         row3.pack(fill="x", padx=10, pady=8)
         self.lbl_perfil_revision = ttk.Label(
-            row3, text="Sin perfil — corrección estándar genérica",
-            foreground="#6c7086"
+            row3, text="Sin perfil — corrección estándar genérica", foreground="#6c7086"
         )
         self.lbl_perfil_revision.pack(side="left", fill="x", expand=True)
-        ttk.Button(row3, text="Cargar perfil…",
-                   style="Perfil.TButton",
-                   command=self._cargar_perfil_dialogo).pack(side="left", padx=4)
+        ttk.Button(
+            row3, text="Cargar perfil…", style="Perfil.TButton", command=self._cargar_perfil_dialogo
+        ).pack(side="left", padx=4)
 
         lf_prog = ttk.LabelFrame(parent, text="Progreso")
         lf_prog.pack(fill="x", **pad)
@@ -1073,15 +1202,18 @@ class AppCorrector(tk.Tk):
 
         row4 = ttk.Frame(parent)
         row4.pack(pady=12)
-        self.btn_iniciar = ttk.Button(row4, text="▶  Iniciar revisión",
-                                       style="Accent.TButton", command=self._iniciar_revision)
+        self.btn_iniciar = ttk.Button(
+            row4, text="▶  Iniciar revisión", style="Accent.TButton", command=self._iniciar_revision
+        )
         self.btn_iniciar.pack(side="left", padx=8)
-        self.btn_detener = ttk.Button(row4, text="■   Detener",
-                                       command=self._detener, state="disabled")
+        self.btn_detener = ttk.Button(
+            row4, text="■   Detener", command=self._detener, state="disabled"
+        )
         self.btn_detener.pack(side="left", padx=4)
 
-        self.lbl_dictamen = ttk.Label(parent, text="", font=("Segoe UI", 11, "bold"),
-                                       foreground="#f38ba8")
+        self.lbl_dictamen = ttk.Label(
+            parent, text="", font=("Segoe UI", 11, "bold"), foreground="#f38ba8"
+        )
         self.lbl_dictamen.pack(pady=4)
 
     # ── TAB CONFIGURACIÓN ─────────────────────────────────────────────────────
@@ -1096,21 +1228,26 @@ class AppCorrector(tk.Tk):
         ttk.Label(row, text="Modelo:").pack(side="left")
         self.cb_modelos_ollama = ttk.Combobox(row, textvariable=self.modelo_ollama, width=28)
         self.cb_modelos_ollama.pack(side="left", padx=8)
-        ttk.Button(row, text="Detectar modelos",
-                   command=self._detectar_modelos_ollama).pack(side="left", padx=4)
+        ttk.Button(row, text="Detectar modelos", command=self._detectar_modelos_ollama).pack(
+            side="left", padx=4
+        )
         self.lbl_ollama_status = ttk.Label(lf_ollama, text="")
         self.lbl_ollama_status.pack(padx=10, pady=(0, 6))
 
         lf_api = ttk.LabelFrame(parent, text="APIs opcionales")
         lf_api.pack(fill="x", **pad)
-        for label, var in [("OpenAI (GPT-4o)", self.key_openai),
-                           ("Google Gemini", self.key_gemini),
-                           ("Anthropic Claude", self.key_claude),
-                           ("Perplexity", self.key_perplexity)]:
+        for label, var in [
+            ("OpenAI (GPT-4o)", self.key_openai),
+            ("Google Gemini", self.key_gemini),
+            ("Anthropic Claude", self.key_claude),
+            ("Perplexity", self.key_perplexity),
+        ]:
             row = ttk.Frame(lf_api)
             row.pack(fill="x", padx=10, pady=4)
             ttk.Label(row, text=f"{label}:", width=22).pack(side="left")
-            ttk.Entry(row, textvariable=var, show="•", width=50).pack(side="left", fill="x", expand=True)
+            ttk.Entry(row, textvariable=var, show="•", width=50).pack(
+                side="left", fill="x", expand=True
+            )
 
         lf_autor = ttk.LabelFrame(parent, text="Corrector")
         lf_autor.pack(fill="x", **pad)
@@ -1119,8 +1256,7 @@ class AppCorrector(tk.Tk):
         ttk.Label(row_a, text="Nombre en anotaciones:").pack(side="left")
         ttk.Entry(row_a, textvariable=self.autor, width=30).pack(side="left", padx=8)
 
-        ttk.Button(parent, text="Guardar keys en .env",
-                   command=self._guardar_env).pack(pady=8)
+        ttk.Button(parent, text="Guardar keys en .env", command=self._guardar_env).pack(pady=8)
 
     # ── TAB PERFIL DE ESTILO ──────────────────────────────────────────────────
 
@@ -1133,22 +1269,27 @@ class AppCorrector(tk.Tk):
         row = ttk.Frame(lf_carga)
         row.pack(fill="x", padx=10, pady=8)
 
-        self.lbl_ruta_perfil = ttk.Label(row, text="(ningún perfil cargado)",
-                                          foreground="#6c7086", width=55)
+        self.lbl_ruta_perfil = ttk.Label(
+            row, text="(ningún perfil cargado)", foreground="#6c7086", width=55
+        )
         self.lbl_ruta_perfil.pack(side="left", fill="x", expand=True)
 
-        ttk.Button(row, text="Cargar perfil .md…",
-                   style="Perfil.TButton",
-                   command=self._cargar_perfil_dialogo).pack(side="left", padx=4)
+        ttk.Button(
+            row,
+            text="Cargar perfil .md…",
+            style="Perfil.TButton",
+            command=self._cargar_perfil_dialogo,
+        ).pack(side="left", padx=4)
 
-        self.btn_quitar_perfil = ttk.Button(row, text="Quitar perfil",
-                                             command=self._quitar_perfil, state="disabled")
+        self.btn_quitar_perfil = ttk.Button(
+            row, text="Quitar perfil", command=self._quitar_perfil, state="disabled"
+        )
         self.btn_quitar_perfil.pack(side="left", padx=4)
 
         self.lbl_estado_perfil = ttk.Label(
             lf_carga,
             text="Sin perfil activo — el programa usará criterios editoriales estándar.",
-            foreground="#6c7086"
+            foreground="#6c7086",
         )
         self.lbl_estado_perfil.pack(padx=10, pady=(0, 8))
 
@@ -1162,15 +1303,21 @@ class AppCorrector(tk.Tk):
             "   antes de analizar cada página, para que el LLM imite tu estilo editorial.\n\n"
             "4. Actualiza el perfil periódicamente añadiendo más PDFs al corpus."
         )
-        ttk.Label(lf_info, text=info, foreground="#6c7086",
-                  font=("Segoe UI", 9), justify="left").pack(padx=12, pady=10)
+        ttk.Label(
+            lf_info, text=info, foreground="#6c7086", font=("Segoe UI", 9), justify="left"
+        ).pack(padx=12, pady=10)
 
         lf_prev = ttk.LabelFrame(parent, text="Preview del perfil activo")
         lf_prev.pack(fill="both", expand=True, **pad)
 
         self.txt_preview_perfil = scrolledtext.ScrolledText(
-            lf_prev, bg="#11111b", fg="#a6adc8",
-            font=("Consolas", 9), borderwidth=0, state="disabled", height=10
+            lf_prev,
+            bg="#11111b",
+            fg="#a6adc8",
+            font=("Consolas", 9),
+            borderwidth=0,
+            state="disabled",
+            height=10,
         )
         self.txt_preview_perfil.pack(fill="both", expand=True, padx=8, pady=8)
 
@@ -1181,17 +1328,17 @@ class AppCorrector(tk.Tk):
         filtros.pack(fill="x", padx=12, pady=8)
 
         ttk.Label(filtros, text="Gravedad:").pack(side="left")
-        self.filtro_gravedad = ttk.Combobox(filtros,
-            values=["Todos", "critica", "importante", "menor"],
-            state="readonly", width=14)
+        self.filtro_gravedad = ttk.Combobox(
+            filtros, values=["Todos", "critica", "importante", "menor"], state="readonly", width=14
+        )
         self.filtro_gravedad.set("Todos")
         self.filtro_gravedad.pack(side="left", padx=8)
         self.filtro_gravedad.bind("<<ComboboxSelected>>", lambda e: self._aplicar_filtro())
 
         ttk.Label(filtros, text="Categoría:").pack(side="left", padx=(16, 0))
-        self.filtro_cat = ttk.Combobox(filtros,
-            values=["Todos"] + list(ASUNTOS.keys()),
-            state="readonly", width=22)
+        self.filtro_cat = ttk.Combobox(
+            filtros, values=["Todos"] + list(ASUNTOS.keys()), state="readonly", width=22
+        )
         self.filtro_cat.set("Todos")
         self.filtro_cat.pack(side="left", padx=8)
         self.filtro_cat.bind("<<ComboboxSelected>>", lambda e: self._aplicar_filtro())
@@ -1201,19 +1348,31 @@ class AppCorrector(tk.Tk):
 
         cols = ("pagina", "gravedad", "categoria", "tipo", "descripcion", "fragmento", "correccion")
         self.tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="extended")
-        anchos = {"pagina": 55, "gravedad": 85, "categoria": 130, "tipo": 120,
-                  "descripcion": 240, "fragmento": 140, "correccion": 180}
-        labels = {"pagina": "Pág.", "gravedad": "Gravedad", "categoria": "Categoría",
-                  "tipo": "Tipo", "descripcion": "Descripción",
-                  "fragmento": "Fragmento", "correccion": "Corrección"}
+        anchos = {
+            "pagina": 55,
+            "gravedad": 85,
+            "categoria": 130,
+            "tipo": 120,
+            "descripcion": 240,
+            "fragmento": 140,
+            "correccion": 180,
+        }
+        labels = {
+            "pagina": "Pág.",
+            "gravedad": "Gravedad",
+            "categoria": "Categoría",
+            "tipo": "Tipo",
+            "descripcion": "Descripción",
+            "fragmento": "Fragmento",
+            "correccion": "Corrección",
+        }
         for col in cols:
-            self.tree.heading(col, text=labels[col],
-                              command=lambda c=col: self._ordenar_por(c))
+            self.tree.heading(col, text=labels[col], command=lambda c=col: self._ordenar_por(c))
             self.tree.column(col, width=anchos[col], minwidth=40)
 
-        self.tree.tag_configure("critica",    background="#3b0000", foreground="#f38ba8")
+        self.tree.tag_configure("critica", background="#3b0000", foreground="#f38ba8")
         self.tree.tag_configure("importante", background="#2a1500", foreground="#fab387")
-        self.tree.tag_configure("menor",      background="#001a00", foreground="#a6e3a1")
+        self.tree.tag_configure("menor", background="#001a00", foreground="#a6e3a1")
 
         scroll_y = ttk.Scrollbar(parent, orient="vertical", command=self.tree.yview)
         scroll_x = ttk.Scrollbar(parent, orient="horizontal", command=self.tree.xview)
@@ -1225,8 +1384,9 @@ class AppCorrector(tk.Tk):
     # ── TAB ENTREGABLES ───────────────────────────────────────────────────────
 
     def _tab_entregables(self, parent):
-        ttk.Label(parent, text="Archivos generados tras la revisión",
-                  font=("Segoe UI", 11)).pack(pady=(20, 12))
+        ttk.Label(parent, text="Archivos generados tras la revisión", font=("Segoe UI", 11)).pack(
+            pady=(20, 12)
+        )
 
         for desc, attr, cmd in [
             ("PDF anotado", "pdf_revisado", self._abrir_pdf_revisado),
@@ -1245,27 +1405,36 @@ class AppCorrector(tk.Tk):
             btn.pack(side="left", padx=4)
             setattr(self, f"btn_{attr}", btn)
 
-        self.btn_carpeta = ttk.Button(parent, text="Abrir carpeta de resultados",
-                                       command=self._abrir_carpeta, state="disabled")
+        self.btn_carpeta = ttk.Button(
+            parent,
+            text="Abrir carpeta de resultados",
+            command=self._abrir_carpeta,
+            state="disabled",
+        )
         self.btn_carpeta.pack(pady=16)
 
     # ── TAB LOG ───────────────────────────────────────────────────────────────
 
     def _tab_log(self, parent):
         self.log_text = scrolledtext.ScrolledText(
-            parent, bg="#11111b", fg="#cdd6f4",
-            font=("Consolas", 9), borderwidth=0, state="disabled"
+            parent,
+            bg="#11111b",
+            fg="#cdd6f4",
+            font=("Consolas", 9),
+            borderwidth=0,
+            state="disabled",
         )
         self.log_text.pack(fill="both", expand=True, padx=8, pady=8)
-        ttk.Button(parent, text="Limpiar log",
-                   command=self._limpiar_log).pack(side="right", padx=8, pady=(0, 8))
+        ttk.Button(parent, text="Limpiar log", command=self._limpiar_log).pack(
+            side="right", padx=8, pady=(0, 8)
+        )
 
     # ── LÓGICA DE PERFIL ──────────────────────────────────────────────────────
 
     def _cargar_perfil_dialogo(self):
         ruta = filedialog.askopenfilename(
             title="Cargar perfil de estilo editorial",
-            filetypes=[("Perfil Markdown", "*.md"), ("Todos los archivos", "*.*")]
+            filetypes=[("Perfil Markdown", "*.md"), ("Todos los archivos", "*.*")],
         )
         if not ruta:
             return
@@ -1297,21 +1466,13 @@ class AppCorrector(tk.Tk):
         self.lbl_perfil_revision.configure(text=resumen, foreground=color_rev)
 
         if cargado:
-            self.lbl_ruta_perfil.configure(
-                text=self.perfil.ruta, foreground="#cdd6f4"
-            )
-            self.lbl_estado_perfil.configure(
-                text=f"◆ Activo: {resumen}",
-                foreground="#a6e3a1"
-            )
+            self.lbl_ruta_perfil.configure(text=self.perfil.ruta, foreground="#cdd6f4")
+            self.lbl_estado_perfil.configure(text=f"◆ Activo: {resumen}", foreground="#a6e3a1")
             self.btn_quitar_perfil.configure(state="normal")
         else:
-            self.lbl_ruta_perfil.configure(
-                text="(ningún perfil cargado)", foreground="#6c7086"
-            )
+            self.lbl_ruta_perfil.configure(text="(ningún perfil cargado)", foreground="#6c7086")
             self.lbl_estado_perfil.configure(
-                text="Sin perfil activo — corrección estándar genérica.",
-                foreground="#6c7086"
+                text="Sin perfil activo — corrección estándar genérica.", foreground="#6c7086"
             )
             self.btn_quitar_perfil.configure(state="disabled")
 
@@ -1348,19 +1509,23 @@ class AppCorrector(tk.Tk):
             return OllamaLocal(modelo=self.modelo_ollama.get())
         elif "OpenAI" in sel:
             k = self.key_openai.get().strip()
-            if not k: raise ValueError("Ingresa tu OpenAI API key.")
+            if not k:
+                raise ValueError("Ingresa tu OpenAI API key.")
             return OpenAIProveedor(api_key=k)
         elif "Gemini" in sel:
             k = self.key_gemini.get().strip()
-            if not k: raise ValueError("Ingresa tu Google API key.")
+            if not k:
+                raise ValueError("Ingresa tu Google API key.")
             return GeminiProveedor(api_key=k)
         elif "Claude" in sel:
             k = self.key_claude.get().strip()
-            if not k: raise ValueError("Ingresa tu Anthropic API key.")
+            if not k:
+                raise ValueError("Ingresa tu Anthropic API key.")
             return ClaudeProveedor(api_key=k)
         elif "Perplexity" in sel:
             k = self.key_perplexity.get().strip()
-            if not k: raise ValueError("Ingresa tu Perplexity API key.")
+            if not k:
+                raise ValueError("Ingresa tu Perplexity API key.")
             return PerplexityProveedor(api_key=k)
         return OllamaLocal(modelo=self.modelo_ollama.get())
 
@@ -1368,9 +1533,7 @@ class AppCorrector(tk.Tk):
         try:
             proveedor = self._construir_proveedor()
             ok, msg = proveedor.verificar_conexion()
-            self.lbl_estado_motor.configure(
-                text=msg, foreground="#a6e3a1" if ok else "#f38ba8"
-            )
+            self.lbl_estado_motor.configure(text=msg, foreground="#a6e3a1" if ok else "#f38ba8")
             self._log(f"Motor: {msg}", "ok" if ok else "error")
         except Exception as e:
             self.lbl_estado_motor.configure(text=str(e), foreground="#f38ba8")
@@ -1390,10 +1553,12 @@ class AppCorrector(tk.Tk):
 
     def _guardar_env(self):
         lineas = []
-        for key, var in [("OPENAI_API_KEY", self.key_openai),
-                         ("GOOGLE_API_KEY", self.key_gemini),
-                         ("ANTHROPIC_API_KEY", self.key_claude),
-                         ("PERPLEXITY_API_KEY", self.key_perplexity)]:
+        for key, var in [
+            ("OPENAI_API_KEY", self.key_openai),
+            ("GOOGLE_API_KEY", self.key_gemini),
+            ("ANTHROPIC_API_KEY", self.key_claude),
+            ("PERPLEXITY_API_KEY", self.key_perplexity),
+        ]:
             if var.get():
                 lineas.append(f"{key}={var.get()}")
         try:
@@ -1428,11 +1593,7 @@ class AppCorrector(tk.Tk):
 
         sistema = self.perfil.construir_sistema()
 
-        hilo = threading.Thread(
-            target=self._proceso_revision,
-            args=(ruta, sistema),
-            daemon=True
-        )
+        hilo = threading.Thread(target=self._proceso_revision, args=(ruta, sistema), daemon=True)
         hilo.start()
 
     def _proceso_revision(self, ruta: str, sistema: str):
@@ -1476,7 +1637,9 @@ class AppCorrector(tk.Tk):
                     hall_pag = self._filtrar_particiones(hall_pag)
                     descartados = antes - len(hall_pag)
                     if descartados:
-                        self._log(f"  Pág. {num_pag}: {descartados} partición(es) descartada(s) como artefacto")
+                        self._log(
+                            f"  Pág. {num_pag}: {descartados} partición(es) descartada(s) como artefacto"
+                        )
                     self.hallazgos.extend(hall_pag)
                     self._log(f"  Pág. {num_pag}: {len(hall_pag)} hallazgo(s)")
                     self.after(0, lambda hp=hall_pag: self._agregar_filas(hp))
@@ -1486,7 +1649,9 @@ class AppCorrector(tk.Tk):
                 except Exception as e:
                     self._log(f"  Pág. {num_pag}: {e}", "error")
 
-                self._prog(i + 1, total, f"Pág. {num_pag}/{total} — {len(self.hallazgos)} hallazgos")
+                self._prog(
+                    i + 1, total, f"Pág. {num_pag}/{total} — {len(self.hallazgos)} hallazgos"
+                )
 
             if self.hallazgos:
                 self._log(f"Revisión completada. Total hallazgos: {len(self.hallazgos)}")
@@ -1496,16 +1661,19 @@ class AppCorrector(tk.Tk):
                 antes_fp = len(self.hallazgos)
                 self.hallazgos = self._filtrar_falsos_positivos(self.hallazgos, ruta)
                 if len(self.hallazgos) != antes_fp:
-                    self._log(f"Tras filtro documental: {len(self.hallazgos)} hallazgos "
-                              f"({antes_fp - len(self.hallazgos)} descartados)")
+                    self._log(
+                        f"Tras filtro documental: {len(self.hallazgos)} hallazgos "
+                        f"({antes_fp - len(self.hallazgos)} descartados)"
+                    )
                     self.after(0, lambda: self._refrescar_tabla())
                 self._generar_entregables(ruta)
 
             self._prog(total, total, f"Completado — {len(self.hallazgos)} hallazgos")
 
         except Exception as e:
-            self._log(f"Error: {e}", "error")
-            self.after(0, lambda: messagebox.showerror("Error", str(e)))
+            msg_err = str(e)
+            self._log(f"Error: {msg_err}", "error")
+            self.after(0, lambda m=msg_err: messagebox.showerror("Error", m))
         finally:
             self.en_proceso = False
             self.after(0, lambda: self.btn_iniciar.configure(state="normal"))
@@ -1530,8 +1698,11 @@ class AppCorrector(tk.Tk):
 
         self._log("Generando informes…")
         ruta_md, ruta_csv, dictamen = generar_informes(
-            self.hallazgos, Path(ruta).name, self.dir_salida,
-            nombre_corrector=autor, nombre_perfil=nombre_perfil
+            self.hallazgos,
+            Path(ruta).name,
+            self.dir_salida,
+            nombre_corrector=autor,
+            nombre_perfil=nombre_perfil,
         )
         self.ruta_informe = ruta_md
         self.ruta_csv = ruta_csv
@@ -1540,10 +1711,12 @@ class AppCorrector(tk.Tk):
 
     def _actualizar_entregables(self, dictamen: str):
         self.lbl_dictamen.configure(text=dictamen)
-        for attr, ruta in [("pdf_revisado", self.ruta_pdf_revisado),
-                           ("xfdf", self.ruta_xfdf),
-                           ("informe", self.ruta_informe),
-                           ("csv", self.ruta_csv)]:
+        for attr, ruta in [
+            ("pdf_revisado", self.ruta_pdf_revisado),
+            ("xfdf", self.ruta_xfdf),
+            ("informe", self.ruta_informe),
+            ("csv", self.ruta_csv),
+        ]:
             lbl = getattr(self, f"lbl_{attr}", None)
             btn = getattr(self, f"btn_{attr}", None)
             if lbl and ruta:
@@ -1558,22 +1731,20 @@ class AppCorrector(tk.Tk):
 
     # Patrón de partición que PyMuPDF introduce al leer columnas justificadas:
     # "palabra- continuación" — guión pegado a la primera parte, espacio, resto en minúsculas.
-    _RE_PARTICION_ARTEFACTO = re.compile(
-        r'\b([a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{2,})-\s+([a-záéíóúüñ]{2,})\b'
-    )
+    _RE_PARTICION_ARTEFACTO = re.compile(r"\b([a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{2,})-\s+([a-záéíóúüñ]{2,})\b")
 
     # Palabras clave en descripción/corrección que indican un error real a conservar
     _INDICADORES_ERROR_REAL = re.compile(
-        r'url|doi|http|nombre propio|ortográf|no existe|imposible|incorrecto el corte|'
-        r'ambigüedad|folio|cornisa|texto cortado|nota.*pie|isbn|erróne',
-        re.IGNORECASE
+        r"url|doi|http|nombre propio|ortográf|no existe|imposible|incorrecto el corte|"
+        r"ambigüedad|folio|cornisa|texto cortado|nota.*pie|isbn|erróne",
+        re.IGNORECASE,
     )
 
     # El fragmento contiene URL o dominio — nunca es artefacto
-    _RE_FRAGMENTO_URL = re.compile(r'https?://|doi\s*\.|\.org|\.com|\.net', re.IGNORECASE)
+    _RE_FRAGMENTO_URL = re.compile(r"https?://|doi\s*\.|\.org|\.com|\.net", re.IGNORECASE)
 
     # Categorías donde nunca se descarta (la partición es secundaria al problema real)
-    _CATEGORIAS_PROTEGIDAS = {'paginacion', 'preliminares_finales', 'imagenes_tablas'}
+    _CATEGORIAS_PROTEGIDAS = {"paginacion", "preliminares_finales", "imagenes_tablas"}
 
     def _filtrar_particiones(self, hallazgos: list) -> list:
         """Descarta hallazgos de partición de palabras que son artefactos de PyMuPDF.
@@ -1593,9 +1764,13 @@ class AppCorrector(tk.Tk):
 
             # ¿Es un hallazgo de partición de palabras?
             es_particion = (
-                "partici" in desc or "partición" in desc
-                or "división" in desc or "divisi" in desc
-                or "separaci" in desc or "dividid" in desc or "truncad" in desc
+                "partici" in desc
+                or "partición" in desc
+                or "división" in desc
+                or "divisi" in desc
+                or "separaci" in desc
+                or "dividid" in desc
+                or "truncad" in desc
                 or self._RE_PARTICION_ARTEFACTO.search(fragmento) is not None
             )
 
@@ -1633,15 +1808,17 @@ class AppCorrector(tk.Tk):
     # (b) verificar la fuente/posición reales de cada fragmento en la página.
     # Reglas validadas contra libros diagramados de InDesign (junio 2026).
 
-    _RE_VERSALITA = re.compile(r'versalita|n[uú]meros?\s+romanos?', re.IGNORECASE)
-    _RE_CURSIVA = re.compile(r'cursiva|it[aá]lica', re.IGNORECASE)
-    _RE_COMILLAS = re.compile(r'comillas?\s+(inglesas?|latinas?|incorrectas?|rectas?)', re.IGNORECASE)
-    _RE_DOBLE_ESPACIO = re.compile(r'doble\s+espacio|espacio\s+doble|dos\s+espacios', re.IGNORECASE)
+    _RE_VERSALITA = re.compile(r"versalita|n[uú]meros?\s+romanos?", re.IGNORECASE)
+    _RE_CURSIVA = re.compile(r"cursiva|it[aá]lica", re.IGNORECASE)
+    _RE_COMILLAS = re.compile(
+        r"comillas?\s+(inglesas?|latinas?|incorrectas?|rectas?)", re.IGNORECASE
+    )
+    _RE_DOBLE_ESPACIO = re.compile(r"doble\s+espacio|espacio\s+doble|dos\s+espacios", re.IGNORECASE)
     # Mayúscula suelta seguida de espacio: artefacto de letterspacing en títulos
     # (p. ej. "L os", "D ioses", "¿Q uién"). Nunca ocurre en texto real.
     # Antes de la mayúscula puede ir inicio, espacio o signo de apertura (¿ ¡ ().
-    _RE_LETTERSPACING = re.compile(r'(?:^|[\s¿¡(])[A-ZÑÁÉÍÓÚ] [a-zñáéíóú]')
-    _RE_PUNTOS_GUIA = re.compile(r'corrupt|car[aá]cteres?\s+corrupt', re.IGNORECASE)
+    _RE_LETTERSPACING = re.compile(r"(?:^|[\s¿¡(])[A-ZÑÁÉÍÓÚ] [a-zñáéíóú]")
+    _RE_PUNTOS_GUIA = re.compile(r"corrupt|car[aá]cteres?\s+corrupt", re.IGNORECASE)
     _ITALIC_FLAG = 2  # bit 1 de span["flags"] en PyMuPDF
 
     @staticmethod
@@ -1694,8 +1871,13 @@ class AppCorrector(tk.Tk):
         # Las fuentes nombran la itálica de varias formas: "Italic", "Ital",
         # "-It" (p. ej. MinionPro-It), "Oblique". Se cubren todas.
         f = span.get("font", "").lower()
-        return bool(span.get("flags", 0) & AppCorrector._ITALIC_FLAG) \
-            or "ital" in f or "oblique" in f or f.endswith("-it") or "-it-" in f
+        return (
+            bool(span.get("flags", 0) & AppCorrector._ITALIC_FLAG)
+            or "ital" in f
+            or "oblique" in f
+            or f.endswith("-it")
+            or "-it-" in f
+        )
 
     def _filtrar_falsos_positivos(self, hallazgos: list, ruta_pdf: str) -> list:
         """Descarta artefactos de extracción y falsos positivos que dependen del
@@ -1709,8 +1891,10 @@ class AppCorrector(tk.Tk):
 
         norma_comillas = self._detectar_norma_comillas(doc)
         if norma_comillas in ("inglesas", "latinas"):
-            self._log(f"  Norma de comillas del documento: {norma_comillas} "
-                      f"(se descartarán quejas que la contradigan)")
+            self._log(
+                f"  Norma de comillas del documento: {norma_comillas} "
+                f"(se descartarán quejas que la contradigan)"
+            )
 
         alto_pag = {i: doc[i].rect.height for i in range(doc.page_count)}
         resultado = []
@@ -1726,11 +1910,13 @@ class AppCorrector(tk.Tk):
 
             # 1. Letterspacing de títulos (mayúscula suelta + espacio en el fragmento)
             if self._RE_LETTERSPACING.search(frag):
-                descartar("letterspacing_titulo"); continue
+                descartar("letterspacing_titulo")
+                continue
 
             # 2. Dobles espacios → casi siempre salto de línea de frase larga
             if self._RE_DOBLE_ESPACIO.search(desc):
-                descartar("doble_espacio_salto_linea"); continue
+                descartar("doble_espacio_salto_linea")
+                continue
 
             # 2b. "Falta espacio entre X e Y" donde X termina una línea e Y
             #     empieza la siguiente = palabra/frase que continúa abajo.
@@ -1739,11 +1925,15 @@ class AppCorrector(tk.Tk):
                 txt = doc[idx].get_text("text")
                 mm = re.search(re.escape(mfe.group(1)) + r"[\s]*" + re.escape(mfe.group(2)), txt)
                 if mm and "\n" in mm.group():
-                    descartar("falta_espacio_salto_linea"); continue
+                    descartar("falta_espacio_salto_linea")
+                    continue
 
             # 3. Puntos guía del índice leídos como caracteres corruptos
-            if self._RE_PUNTOS_GUIA.search(desc) and ("índice" in desc.lower() or "indice" in desc.lower()):
-                descartar("puntos_guia_indice"); continue
+            if self._RE_PUNTOS_GUIA.search(desc) and (
+                "índice" in desc.lower() or "indice" in desc.lower()
+            ):
+                descartar("puntos_guia_indice")
+                continue
 
             # 4. Comillas que contradicen la norma dominante del documento.
             #    La redacción del modelo varía ("deben ser latinas", "comillas
@@ -1754,9 +1944,11 @@ class AppCorrector(tk.Tk):
                 pide_latinas = "latina" in d
                 pide_inglesas = "ser inglesa" in d or "ser comillas inglesa" in d
                 if norma_comillas == "inglesas" and pide_latinas and not pide_inglesas:
-                    descartar("comillas_norma_documento"); continue
+                    descartar("comillas_norma_documento")
+                    continue
                 if norma_comillas == "latinas" and pide_inglesas and not pide_latinas:
-                    descartar("comillas_norma_documento"); continue
+                    descartar("comillas_norma_documento")
+                    continue
 
             # 5/6/7. Reglas que requieren mirar la fuente o la posición real
             spans = None  # lazy
@@ -1768,7 +1960,8 @@ class AppCorrector(tk.Tk):
                     spans = self._spans_de_fragmento(doc, h)
                 H = alto_pag[idx]
                 if spans and all(s["bbox"][3] > H - 22 for s in spans):
-                    descartar("footer_slug_indesign"); continue
+                    descartar("footer_slug_indesign")
+                    continue
 
             # 6. Cursiva ya presente: el span del fragmento ya es itálico
             if self._RE_CURSIVA.search(desc):
@@ -1777,15 +1970,18 @@ class AppCorrector(tk.Tk):
                 if spans:
                     ital = sum(1 for s in spans if self._es_italica(s))
                     if ital / len(spans) >= 0.6:
-                        descartar("cursiva_ya_presente"); continue
+                        descartar("cursiva_ya_presente")
+                        continue
 
             # 7. Versalitas ya presentes: en libros diagramados, los romanos
             #    en versalitas se extraen en minúsculas (xix, xvi). Si el
             #    fragmento ya trae el romano en minúscula, está bien compuesto.
             if self._RE_VERSALITA.search(desc):
-                if re.search(r'\b(siglo|siglos)\s+[ivxlcdm]{1,7}\b', frag) \
-                        or re.search(r'\b[ivxlcdm]{2,7}\b', frag):
-                    descartar("versalita_ya_presente"); continue
+                if re.search(r"\b(siglo|siglos)\s+[ivxlcdm]{1,7}\b", frag) or re.search(
+                    r"\b[ivxlcdm]{2,7}\b", frag
+                ):
+                    descartar("versalita_ya_presente")
+                    continue
 
             resultado.append(h)
 
@@ -1800,10 +1996,9 @@ class AppCorrector(tk.Tk):
 
     def _prog(self, actual: int, total: int, msg: str):
         pct = int((actual / max(total, 1)) * 100)
-        self.after(0, lambda: [
-            self.barra_prog.configure(value=pct),
-            self.lbl_prog.configure(text=msg)
-        ])
+        self.after(
+            0, lambda: [self.barra_prog.configure(value=pct), self.lbl_prog.configure(text=msg)]
+        )
 
     def _limpiar_tabla(self):
         for item in self.tree.get_children():
@@ -1818,14 +2013,20 @@ class AppCorrector(tk.Tk):
     def _agregar_filas(self, hallazgos: list):
         for h in hallazgos:
             grav = h.get("gravedad", "menor")
-            self.tree.insert("", "end", values=(
-                h.get("pagina", ""), grav,
-                h.get("categoria", "").replace("_", " "),
-                h.get("tipo_anotacion", "").replace("_", " "),
-                h.get("descripcion", "")[:80],
-                h.get("fragmento", "")[:45],
-                h.get("correccion", "")[:60],
-            ), tags=(grav,))
+            self.tree.insert(
+                "",
+                "end",
+                values=(
+                    h.get("pagina", ""),
+                    grav,
+                    h.get("categoria", "").replace("_", " "),
+                    h.get("tipo_anotacion", "").replace("_", " "),
+                    h.get("descripcion", "")[:80],
+                    h.get("fragmento", "")[:45],
+                    h.get("correccion", "")[:60],
+                ),
+                tags=(grav,),
+            )
         n = len(self.tree.get_children())
         self.lbl_conteo.configure(text=f"{n} hallazgo(s)")
 
@@ -1833,11 +2034,14 @@ class AppCorrector(tk.Tk):
         fg = self.filtro_gravedad.get()
         fc = self.filtro_cat.get()
         self._limpiar_tabla()
-        self._agregar_filas([
-            h for h in self.hallazgos
-            if (fg == "Todos" or h.get("gravedad") == fg)
-            and (fc == "Todos" or h.get("categoria") == fc)
-        ])
+        self._agregar_filas(
+            [
+                h
+                for h in self.hallazgos
+                if (fg == "Todos" or h.get("gravedad") == fg)
+                and (fc == "Todos" or h.get("categoria") == fc)
+            ]
+        )
 
     def _ordenar_por(self, col: str):
         items = [(self.tree.set(i, col), i) for i in self.tree.get_children()]
@@ -1850,6 +2054,7 @@ class AppCorrector(tk.Tk):
             messagebox.showwarning("Aviso", "El archivo no existe todavía.")
             return
         import subprocess
+
         if sys.platform == "win32":
             os.startfile(ruta)
         elif sys.platform == "darwin":
@@ -1857,12 +2062,21 @@ class AppCorrector(tk.Tk):
         else:
             subprocess.run(["xdg-open", ruta])
 
-    def _abrir_pdf_revisado(self): self._abrir_archivo(self.ruta_pdf_revisado)
-    def _abrir_xfdf(self):         self._abrir_archivo(self.ruta_xfdf)
-    def _abrir_informe(self):      self._abrir_archivo(self.ruta_informe)
-    def _abrir_csv(self):          self._abrir_archivo(self.ruta_csv)
+    def _abrir_pdf_revisado(self):
+        self._abrir_archivo(self.ruta_pdf_revisado)
+
+    def _abrir_xfdf(self):
+        self._abrir_archivo(self.ruta_xfdf)
+
+    def _abrir_informe(self):
+        self._abrir_archivo(self.ruta_informe)
+
+    def _abrir_csv(self):
+        self._abrir_archivo(self.ruta_csv)
+
     def _abrir_carpeta(self):
-        if self.dir_salida: self._abrir_archivo(self.dir_salida)
+        if self.dir_salida:
+            self._abrir_archivo(self.dir_salida)
 
 
 # ───────────────────────────────────────────────────────────────────────────────

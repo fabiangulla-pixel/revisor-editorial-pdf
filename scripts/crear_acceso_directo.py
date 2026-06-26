@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Crea el acceso directo en el Escritorio con ícono personalizado."""
-import sys
+
 import os
+import sys
 from pathlib import Path
+
 
 def crear_acceso_directo():
     # Rutas
     script_dir = Path(__file__).parent
-    programa   = script_dir / "corrector_editorial.py"
-    icono      = script_dir / "corrector_editorial.ico"
+    programa = script_dir / "corrector_editorial.py"
+    icono = script_dir / "corrector_editorial.ico"
     python_exe = sys.executable
 
     # Escritorio del usuario actual
@@ -27,6 +29,7 @@ def crear_acceso_directo():
     # Crear .lnk con win32com
     try:
         import win32com.client
+
         shell = win32com.client.Dispatch("WScript.Shell")
         shortcut = shell.CreateShortCut(str(acceso))
         shortcut.TargetPath = str(python_exe)
@@ -55,9 +58,11 @@ $Shortcut.Save()
 Write-Host "Acceso directo creado: {acceso}"
 """
     import subprocess
+
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-        capture_output=True, text=True
+        capture_output=True,
+        text=True,
     )
     if result.returncode == 0:
         print(f"Acceso directo creado: {acceso}")

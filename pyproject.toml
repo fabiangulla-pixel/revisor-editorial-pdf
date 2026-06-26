@@ -14,7 +14,6 @@ select = ["E", "F", "I", "B", "C4", "UP", "W"]
 ignore = [
     # Reglas que exigirían cambios de comportamiento en código ya validado:
     "B905",  # zip() sin strict= — añadirlo cambia semántica
-    "UP038", # isinstance con (X, Y) → X | Y — solo estilo, sin valor aquí
     "C401", "C408",  # generadores/dict-comp — el estilo actual es legible
     "E501",  # líneas largas: muchas son prompts/strings que no conviene partir
 ]
