@@ -1,0 +1,25 @@
+[project]
+name = "revisor-editorial-pdf"
+version = "2.1.0"
+description = "Corrector de pruebas editorial de PDF diagramados, con perfil de estilo y filtro de falsos positivos de extracción."
+requires-python = ">=3.11"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["build", "dist", "scripts/_experimentos"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C4", "UP", "W"]
+ignore = [
+    # Reglas que exigirían cambios de comportamiento en código ya validado:
+    "B905",  # zip() sin strict= — añadirlo cambia semántica
+    "UP038", # isinstance con (X, Y) → X | Y — solo estilo, sin valor aquí
+    "C401", "C408",  # generadores/dict-comp — el estilo actual es legible
+    "E501",  # líneas largas: muchas son prompts/strings que no conviene partir
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests y scripts ajustan sys.path antes de importar: E402 es esperado.
+"tests/*" = ["E402"]
+"scripts/*" = ["E402"]

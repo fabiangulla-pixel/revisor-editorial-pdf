@@ -1,0 +1,41 @@
+# ── Entornos y caché de Python ──────────────────────────────────────────────
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── Artefactos de compilación (PyInstaller) ─────────────────────────────────
+build/
+dist/
+*.spec.bak
+
+# ── Secretos y configuración local ──────────────────────────────────────────
+.env
+*.key
+
+# ── Datos de prueba pesados (no versionar) ──────────────────────────────────
+Pruebas/
+test_salida/
+*.pdf
+*.docx
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Salidas de revisión generadas ───────────────────────────────────────────
+*_REVISADO.pdf
+*_comentarios.xfdf
+*_revision_*/
+
+# ── Sistema operativo / editores ────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+.idea/
+.vscode/
