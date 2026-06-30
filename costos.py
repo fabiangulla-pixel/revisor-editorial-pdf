@@ -12,12 +12,14 @@ con el prompt de sistema (perfil de estilo) + el texto de la página. Solo texto
 (no visión). NO usar tiktoken (es de OpenAI y subcuenta los tokens de Claude).
 
 Precios (USD por 1M de tokens), verificados:
-- Claude (skill claude-api, cache 2026-06-04): sonnet-4-6 $3/$15 (por defecto),
-  opus-4-8 $5/$25, haiku-4-5 $1/$5.
-- OpenAI (web 2026-06-27): gpt-4o $2.50/$10, gpt-4o-mini $0.15/$0.60.
-- Gemini: 2.0-flash ~$0.10/$0.40, 1.5-flash ~$0.075/$0.30 (orden de magnitud).
-- Perplexity (web 2026-06-27): sonar-pro $3/$15 + tarifa de búsqueda
-  ~$6-14/1000 requests (se aproxima $0.010/página como recargo).
+- Claude (skill claude-api, cache 2026-06-30): opus-4-8 $5/$25, sonnet-4-6 $3/$15
+  (por defecto), haiku-4-5 $1/$5.
+- OpenAI (web 2026-06-30): gpt-4o $2.50/$10, gpt-4o-mini $0.15/$0.60.
+- Gemini (web 2026-06-30): 2.5-flash $0.30/$2.50 (por defecto), 2.5-flash-lite
+  $0.10/$0.40. ¡OJO! 2.0-flash y 1.5-flash quedaron DESCONTINUADOS (2.0-flash se
+  apagó el 1-jun-2026); se conservan abajo solo como respaldo histórico.
+- Perplexity (web 2026-06-30): sonar-pro $3/$15 + tarifa de búsqueda
+  ~$6-14/1000 requests (se aproxima $0.010/página como recargo); sonar $1/$1.
 - Ollama: LOCAL, costo 0.
 """
 
@@ -25,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-PRECIOS_VERIFICADOS_EL = "2026-06-27"
+PRECIOS_VERIFICADOS_EL = "2026-06-30"
 CARACTERES_POR_TOKEN = 4.0
 # Recargo aproximado por request de Perplexity (tarifa de búsqueda media).
 PERPLEXITY_FEE_POR_REQUEST = 0.010
@@ -45,7 +47,10 @@ PRECIOS: dict[str, PrecioModelo] = {
     # OpenAI
     "gpt-4o-mini": PrecioModelo(0.15, 0.60),
     "gpt-4o": PrecioModelo(2.50, 10.00),
-    # Gemini
+    # Gemini (vigentes)
+    "gemini-2.5-flash": PrecioModelo(0.30, 2.50),
+    "gemini-2.5-flash-lite": PrecioModelo(0.10, 0.40),
+    # Gemini (descontinuados — respaldo histórico, no usar como default)
     "gemini-2.0-flash": PrecioModelo(0.10, 0.40),
     "gemini-1.5-flash": PrecioModelo(0.075, 0.30),
     "gemini-1.5-pro": PrecioModelo(1.25, 5.00),
@@ -59,7 +64,7 @@ PROVEEDORES_LOCALES = {"ollama"}
 # Modelo por defecto de cada proveedor (alineado con las clases ProveedorLLM).
 MODELO_DEFAULT = {
     "openai": "gpt-4o",
-    "gemini": "gemini-2.0-flash",
+    "gemini": "gemini-2.5-flash",
     "claude": "claude-sonnet-4-6",
     "perplexity": "sonar-pro",
 }
