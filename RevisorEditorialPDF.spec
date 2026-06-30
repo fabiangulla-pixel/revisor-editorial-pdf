@@ -3,7 +3,9 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = []
 binaries = []
-hiddenimports = ['tkinter', 'tkinter.ttk', 'tkinter.filedialog', 'tkinter.messagebox', 'tkinter.scrolledtext', 'fitz', 'dotenv', 'requests']
+# 'costos' = módulo de estimación de costo IA (import diferido dentro de funciones,
+# PyInstaller no lo detecta solo → declararlo explícitamente).
+hiddenimports = ['tkinter', 'tkinter.ttk', 'tkinter.filedialog', 'tkinter.messagebox', 'tkinter.scrolledtext', 'fitz', 'dotenv', 'requests', 'costos']
 tmp_ret = collect_all('fitz')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 

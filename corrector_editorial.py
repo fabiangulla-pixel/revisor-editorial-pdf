@@ -355,6 +355,17 @@ class PerfilEstilo:
 
 
 class ProveedorLLM(ABC):
+    # Acumulador de `usage` real de cada llamada (estándar de costo IA: medir el
+    # costo real del lote desde el usage del proveedor). Cada subclase llama a
+    # _registrar_usage() tras su respuesta; el bucle lee .usages al terminar.
+    usages: list = None
+
+    def _registrar_usage(self, usage) -> None:
+        if self.usages is None:
+            self.usages = []
+        if usage is not None:
+            self.usages.append(usage)
+
     @abstractmethod
     def analizar(self, prompt_usuario: str, pagina: int, sistema: str) -> dict:
         pass
@@ -454,6 +465,7 @@ class OpenAIProveedor(ProveedorLLM):
             max_tokens=4000,
             response_format={"type": "json_object"},
         )
+        self._registrar_usage(getattr(resp, "usage", None))
         resultado = self._limpiar_json(resp.choices[0].message.content)
         resultado.setdefault("pagina", pagina)
         resultado.setdefault("hallazgos", [])
@@ -487,6 +499,7 @@ class GeminiProveedor(ProveedorLLM):
     def analizar(self, prompt_usuario: str, pagina: int, sistema: str) -> dict:
         model = self._crear_model(sistema)
         resp = model.generate_content(prompt_usuario)
+        self._registrar_usage(getattr(resp, "usage_metadata", None))
         resultado = self._limpiar_json(resp.text)
         resultado.setdefault("pagina", pagina)
         resultado.setdefault("hallazgos", [])
@@ -519,6 +532,7 @@ class ClaudeProveedor(ProveedorLLM):
             system=sistema,
             messages=[{"role": "user", "content": prompt_usuario}],
         )
+        self._registrar_usage(getattr(resp, "usage", None))
         resultado = self._limpiar_json(resp.content[0].text)
         resultado.setdefault("pagina", pagina)
         resultado.setdefault("hallazgos", [])
@@ -1579,6 +1593,41 @@ class AppCorrector(tk.Tk):
             messagebox.showerror("Error", "Selecciona un archivo PDF válido.")
             return
 
+        # Estándar de costo IA: estimar volumen→tokens→USD y pedir confirmación
+        # antes de gastar. Contamos las páginas con texto del PDF y mapeamos el
+        # proveedor/modelo activo al estimador.
+        try:
+            from costos import MODELO_DEFAULT, estimar_revision_pdf
+
+            sel = self.proveedor_sel.get().lower()
+            if "ollama" in sel:
+                prov_key = "ollama"
+            else:
+                prov_key = next((p for p in MODELO_DEFAULT if p in sel), "")
+            analizador_prev = AnalizadorPDF(ruta)
+            total_pag = analizador_prev.num_paginas()
+            n_texto = 0
+            for i in range(total_pag):
+                try:
+                    if analizador_prev.extraer_pagina(i).get("tiene_texto"):
+                        n_texto += 1
+                except Exception:
+                    n_texto += 1  # ante la duda, contar (cota superior)
+            est = estimar_revision_pdf(n_texto, prov_key)
+            if not messagebox.askyesno(
+                "Revisar con IA — costo estimado",
+                est.resumen() + "\n\n¿Iniciar la revisión?",
+            ):
+                self._log("Revisión cancelada por el usuario (antes de gastar).", "warn")
+                return
+        except Exception as e:
+            # Si la estimación falla, no bloquear: avisar y dejar decidir.
+            if not messagebox.askyesno(
+                "Revisar con IA",
+                f"No se pudo estimar el costo con precisión ({e}).\n¿Iniciar de todos modos?",
+            ):
+                return
+
         if self.perfil.esta_cargado():
             self._log(f"Iniciando con perfil: {self.perfil.resumen_corto()}", "ok")
         else:
@@ -1669,6 +1718,25 @@ class AppCorrector(tk.Tk):
                 self._generar_entregables(ruta)
 
             self._prog(total, total, f"Completado — {len(self.hallazgos)} hallazgos")
+
+            # Costo REAL de la revisión, leído del usage acumulado del proveedor.
+            try:
+                from costos import MODELO_DEFAULT, costo_real_desde_usages
+
+                sel = self.proveedor_sel.get().lower()
+                prov_key = "ollama" if "ollama" in sel else next(
+                    (p for p in MODELO_DEFAULT if p in sel), ""
+                )
+                modelo_ref = getattr(proveedor, "modelo", "") or MODELO_DEFAULT.get(prov_key, "")
+                real = costo_real_desde_usages(prov_key, modelo_ref, proveedor.usages or [])
+                if real.tokens_totales > 0:
+                    self._log(
+                        f"💲 Costo real: ${real.costo_usd:.4f} USD "
+                        f"({real.tokens_totales:,} tokens)",
+                        "ok",
+                    )
+            except Exception:
+                pass
 
         except Exception as e:
             msg_err = str(e)

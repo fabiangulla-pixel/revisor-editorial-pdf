@@ -4,6 +4,11 @@ version = "2.1.0"
 description = "Corrector de pruebas editorial de PDF diagramados, con perfil de estilo y filtro de falsos positivos de extracción."
 requires-python = ">=3.11"
 
+[tool.pytest.ini_options]
+# Solo la suite oficial en tests/. scripts/_experimentos contiene scripts
+# sueltos (con sys.exit) que no son tests y rompen la recolección de pytest.
+testpaths = ["tests"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
