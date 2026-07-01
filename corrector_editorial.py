@@ -455,16 +455,31 @@ class OpenAIProveedor(ProveedorLLM):
             return False, f"OpenAI error: {e}"
 
     def analizar(self, prompt_usuario: str, pagina: int, sistema: str) -> dict:
-        resp = self.cliente.chat.completions.create(
+        mensajes = [
+            {"role": "system", "content": sistema},
+            {"role": "user", "content": prompt_usuario},
+        ]
+        # Los modelos GPT-5.x usan 'max_completion_tokens' (rechazan 'max_tokens')
+        # y solo admiten temperature=1. Los modelos previos (gpt-4o) usan
+        # 'max_tokens'. Intentamos con el esquema nuevo y, si el modelo se queja,
+        # reintentamos con el clásico — así funciona con toda la familia.
+        base = dict(
             model=self.modelo,
-            messages=[
-                {"role": "system", "content": sistema},
-                {"role": "user", "content": prompt_usuario},
-            ],
-            temperature=0.1,
-            max_tokens=4000,
+            messages=mensajes,
             response_format={"type": "json_object"},
         )
+        try:
+            resp = self.cliente.chat.completions.create(
+                **base, max_completion_tokens=4000
+            )
+        except Exception as e:
+            msg = str(e).lower()
+            if "max_completion_tokens" in msg or "max_tokens" in msg or "temperature" in msg:
+                resp = self.cliente.chat.completions.create(
+                    **base, temperature=0.1, max_tokens=4000
+                )
+            else:
+                raise
         self._registrar_usage(getattr(resp, "usage", None))
         resultado = self._limpiar_json(resp.choices[0].message.content)
         resultado.setdefault("pagina", pagina)
@@ -1015,9 +1030,10 @@ class AppCorrector(tk.Tk):
         self.minsize(860, 600)
         self.configure(bg="#1e1e2e")
 
-        from costos import MODELOS_DISPONIBLES
+        from costos import MODELOS_DISPONIBLES, MODELOS_OLLAMA_SUGERIDOS
 
         self.modelos_disponibles = MODELOS_DISPONIBLES
+        self.modelos_ollama_sugeridos = MODELOS_OLLAMA_SUGERIDOS
 
         self.ruta_pdf = tk.StringVar()
         self.proveedor_sel = tk.StringVar(value=self.PROVEEDORES[0])

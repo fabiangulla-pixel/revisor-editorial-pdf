@@ -105,6 +105,24 @@ MODELOS_DISPONIBLES = {
     "perplexity": ["sonar-pro", "sonar", "sonar-reasoning", "sonar-reasoning-pro"],
 }
 
+# Modelos locales (Ollama) SUGERIDOS para revisión editorial en español, ordenados
+# de más a menos exigente en memoria. Los grandes (72b/70b/32b) apuntan a equipos
+# con mucha memoria (p. ej. DGX Spark, 128 GB unificados): dan calidad a la par de
+# las APIs, 100 % local y privado. Los pequeños (3b/4b) corren en equipos modestos
+# como primer barrido. Es solo una lista de conveniencia: el combobox es editable y
+# "Detectar modelos" trae los realmente instalados.
+MODELOS_OLLAMA_SUGERIDOS = [
+    "qwen2.5:72b",       # calidad ~API, para equipos con mucha memoria (DGX Spark)
+    "llama3.3:70b",      # alternativa 70B, excelente seguimiento de instrucciones
+    "qwen2.5:32b",       # muy alta calidad, más liviano que 72b
+    "gemma3:12b",        # buen equilibrio calidad/tamaño
+    "qwen2.5:14b",       # punto dulce con GPU de 16 GB
+    "qwen2.5:7b",        # usable en equipos de gama media
+    "gemma3:4b",         # primer barrido en equipos modestos (7-8 GB RAM)
+    "qwen2.5:3b",        # el más liviano
+    "llama3.1",          # genérico de respaldo
+]
+
 
 def _precio_de(modelo: str) -> tuple[PrecioModelo, bool]:
     """Devuelve (precio, es_catalogado). Empareja por prefijo de familia (la más
