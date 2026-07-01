@@ -723,16 +723,27 @@ ASUNTOS = {
 
 
 def texto_anotacion(h: dict) -> str:
-    grav = h.get("gravedad", "").upper()
-    desc = h.get("descripcion", "")
-    corr = h.get("correccion", "")
-    cert = h.get("certeza", "")
-    auto = "✓ Autoaplicable" if h.get("autoaplicable") else "✗ Decisión editorial"
-    partes = [f"[{grav}] {desc}"]
-    if corr:
-        partes.append(f"→ {corr}")
-    partes.append(f"Certeza: {cert} | {auto}")
-    return "\n".join(partes)
+    """Texto VISIBLE del globo, con la voz natural del corrector (FAGV).
+
+    Solo se muestra la corrección propuesta (o, si no la hay, la descripción del
+    problema): telegráfico, como una anotación humana. La clasificación
+    (gravedad, certeza, autoaplicable) es metadato interno y NO se imprime en el
+    globo — vive en el JSON del hallazgo y en el `title`/`subject` de la anotación
+    para poder filtrar y ordenar, pero el editor no la ve como ruido.
+    """
+    desc = (h.get("descripcion") or "").strip()
+    corr = (h.get("correccion") or "").strip()
+    tipo = h.get("tipo_anotacion", "")
+
+    # Un tachado se explica solo (el texto va tachado): no necesita globo salvo
+    # que la corrección aporte algo más que "eliminar".
+    if tipo == "tachado" and corr.lower() in ("", "eliminar", "quitar", "borrar", "suprimir"):
+        return corr or desc or ""
+
+    # Preferir la corrección concreta (lo accionable). La descripción del error
+    # solo se usa como respaldo cuando no hay corrección: el corrector humano
+    # anota qué hacer, no describe el problema.
+    return corr or desc or ""
 
 
 def anotar_pdf(ruta_original: str, hallazgos: list, ruta_salida: str, autor: str):
