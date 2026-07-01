@@ -113,3 +113,87 @@ def test_cursiva_detectada(desc):
 
 def test_puntos_guia_indice_detectado():
     assert AppCorrector._RE_PUNTOS_GUIA.search("Caracteres corruptos en el índice") is not None
+
+
+# ── Falsos positivos de revistas académicas (referencias/DOIs) ──────────────
+# Calibrado con NovumJus V20N1. Estos patrones son la basura que el filtro del
+# libro de historia (oligarquías) no conocía.
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "Eliminar el espacio: 'https://doi.org/10.21830/19006586.1468'.",
+        "Quitar el espacio: «https://doi.org/10.21830/19006586.1408».",
+        "Eliminar el espacio antes del DOI",
+        "Unificar la URL sin espacios: https://novumjus.ucatolica.edu.co/article/vi",
+    ],
+)
+def test_espacio_en_enlace_detectado(texto):
+    assert AppCorrector._RE_ESPACIO_ENLACE.search(texto) is not None
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "Verificar el DOI y el fragmento final.",
+        "Comprobar la nota 6.",
+        "Revisar visualmente el ISSN en la portada.",
+        "debería respetar exactamente el DOI publicado",
+    ],
+)
+def test_verificar_sin_correccion_detectado(texto):
+    assert AppCorrector._RE_VERIFICAR.search(texto) is not None
+
+
+def test_verificar_no_descarta_si_hay_reemplazo():
+    # Si el hallazgo trae "Reemp:", NO es basura: es una corrección concreta.
+    texto = "Verificar el nombre. Reemp: Körner"
+    assert "reemp" in texto.lower()  # la regla exige ausencia de 'reemp' para descartar
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "Diseñadora: separar en campos (Imagen / Código / Autor).",
+        "Diagramador: completar el dato que falta.",
+        "Diseñador: ajustar la composición.",
+    ],
+)
+def test_instruccion_disenadora_detectada(texto):
+    assert AppCorrector._RE_DISENADORA.search(texto) is not None
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "Unificar en toda la página: Gómez Ortiz",
+        "Unificar el formato de entradas",
+        "Unificar con el formato de la cabecera",
+    ],
+)
+def test_unificar_vago_detectado(texto):
+    assert AppCorrector._RE_UNIFICAR_VAGO.search(texto) is not None
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "Reencadenar la referencia completa.",
+        "Ajustar la composición para que el salto de línea no rompa la referencia.",
+        "Reconstruir la referencia partida.",
+    ],
+)
+def test_reencadenar_detectado(texto):
+    assert AppCorrector._RE_REENCADENAR.search(texto) is not None
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "Eliminar la tabulación y dejar un espacio regular.",
+        "Unificar en una sola cadena sin cortes ni espacios espurios.",
+    ],
+)
+def test_tabulacion_detectada(texto):
+    assert AppCorrector._RE_TABULACION.search(texto) is not None

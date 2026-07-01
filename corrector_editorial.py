@@ -158,6 +158,23 @@ Los siguientes NO son errores reales — son artefactos de extracción:
     hora de exportación, cornisa/folio "duplicado") → es metadato de la exportación, NO va impreso.
   - Líneas de puntos del índice leídas como "caracteres corruptos" (����) → son los puntos guía. No es error.
 
+✗ REFERENCIAS, DOIs Y URLs (revistas académicas)
+  - "Eliminar/quitar el espacio antes de https://… o del DOI" → la URL se parte por salto de línea al
+    extraer el texto; lo que precede a "https" es la coma o el punto legítimo de la referencia, NO un
+    espacio espurio dentro del enlace. NO lo reportes.
+  - "Reencadenar/reconstruir la referencia" o "el salto de línea rompe la referencia" → es composición
+    normal: una referencia larga ocupa varias líneas. NO es error.
+  - Tabulación o "espacio regular/consistente" entre columnas (créditos, ISSN, cabeceras) → es
+    maquetación intencional de InDesign, no un error de espaciado.
+
+✗ NO DIVAGUES: SOLO ERRORES CON CORRECCIÓN CONCRETA
+  - NO generes hallazgos de "Verificar…", "Comprobar…", "Revisar visualmente…" sin una corrección
+    concreta: eso es trabajo de un humano, no una marca de corrección de pruebas. Si no puedes proponer
+    la corrección exacta, NO marques.
+  - NO des instrucciones de maquetación a la diseñadora/diagramador ("Diseñadora: separar en campos…",
+    "colocar como superíndice…"): tú corriges el TEXTO, no diriges la composición.
+  - NO uses "Unificar en toda la página/formato" de forma vaga: marca el caso concreto con su corrección.
+
 ════════════════════════════════════════════════════
 ESCALA DE GRAVEDAD
 ════════════════════════════════════════════════════
@@ -1946,6 +1963,46 @@ class AppCorrector(tk.Tk):
     # Antes de la mayúscula puede ir inicio, espacio o signo de apertura (¿ ¡ ().
     _RE_LETTERSPACING = re.compile(r"(?:^|[\s¿¡(])[A-ZÑÁÉÍÓÚ] [a-zñáéíóú]")
     _RE_PUNTOS_GUIA = re.compile(r"corrupt|car[aá]cteres?\s+corrupt", re.IGNORECASE)
+
+    # ── Falsos positivos de documentos con referencias/DOIs (revistas académicas)
+    # Calibrado con NovumJus V20N1 (revista jurídica): el filtro previo se hizo con
+    # un libro de historia sin apenas DOIs; estos patrones cubren la basura nueva.
+
+    # "Eliminar/quitar espacio" referido a una URL/DOI: la URL se parte por salto de
+    # línea al extraer y el modelo cree que hay un espacio espurio dentro del enlace.
+    # En el PDF real lo que precede a https:// es la coma/punto de la referencia.
+    _RE_ESPACIO_ENLACE = re.compile(
+        r"(?:elimin|quit).{0,20}espacio.{0,40}(?:https?|doi|url|://|enlace)"
+        r"|(?:https?|doi|url|://).{0,40}espacio",
+        re.IGNORECASE,
+    )
+    # "Verificar/comprobar/revisar visualmente…" SIN una corrección concreta:
+    # es un dato a comprobar por un humano, no un error tipográfico marcable.
+    _RE_VERIFICAR = re.compile(
+        r"^\s*(?:verificar|comprobar|revisar\s+(?:visualmente|la\s+cadena|maquetaci))"
+        r"|deber[ií]a\s+respetar",
+        re.IGNORECASE,
+    )
+    # Instrucción de maquetación a la diseñadora/diagramador (no es corrección de prueba).
+    _RE_DISENADORA = re.compile(
+        r"dise[ñn]adora?|diagramador[ao]?|separar\s+en\s+campos", re.IGNORECASE
+    )
+    # "Unificar … en toda la página/formato/presentación" sin objeto ni corrección concreta.
+    _RE_UNIFICAR_VAGO = re.compile(
+        r"unificar.{0,40}(?:en\s+toda\s+la\s+p[aá]gina|formato|presentaci[oó]n|el\s+tramo|entradas)",
+        re.IGNORECASE,
+    )
+    # Artefacto de extracción: referencia/enlace partido entre líneas que hay que "reencadenar".
+    _RE_REENCADENAR = re.compile(
+        r"salto\s+de\s+l[ií]nea|reencadenar|reconstruir\s+la\s+referencia|no\s+rompa\s+la",
+        re.IGNORECASE,
+    )
+    # Tabulación / espaciado de columnas de InDesign leído como error de espacios.
+    _RE_TABULACION = re.compile(
+        r"tabulaci[oó]n|espacio\s+regular|espacios?\s+espurios|una\s+sola\s+cadena",
+        re.IGNORECASE,
+    )
+
     _ITALIC_FLAG = 2  # bit 1 de span["flags"] en PyMuPDF
 
     @staticmethod
@@ -2109,6 +2166,43 @@ class AppCorrector(tk.Tk):
                 ):
                     descartar("versalita_ya_presente")
                     continue
+
+            # ── Falsos positivos de revistas académicas (referencias/DOIs) ──
+            # El texto a evaluar es descripción + corrección (donde el modelo
+            # redacta el comentario natural del globo).
+            texto = f"{desc} {h.get('correccion', '')}".strip()
+
+            # 8. "Eliminar espacio" dentro de una URL/DOI = enlace partido por salto
+            #    de línea. No hay espacio espurio en el PDF real.
+            if self._RE_ESPACIO_ENLACE.search(texto):
+                descartar("espacio_en_enlace_doi")
+                continue
+
+            # 9. "Verificar/comprobar…" sin corrección concreta = dato a revisar por
+            #    un humano, no un error tipográfico. Si trae "Reemp:" se conserva.
+            if self._RE_VERIFICAR.search(texto) and "reemp" not in texto.lower():
+                descartar("verificar_sin_correccion")
+                continue
+
+            # 10. Instrucción de maquetación a la diseñadora/diagramador.
+            if self._RE_DISENADORA.search(texto):
+                descartar("instruccion_disenadora")
+                continue
+
+            # 11. "Unificar … en toda la página/formato" vago, sin corrección concreta.
+            if self._RE_UNIFICAR_VAGO.search(texto) and "reemp" not in texto.lower():
+                descartar("unificar_vago")
+                continue
+
+            # 12. Referencia/enlace partido entre líneas ("reencadenar", "no rompa").
+            if self._RE_REENCADENAR.search(texto):
+                descartar("salto_de_linea_referencia")
+                continue
+
+            # 13. Tabulación/espaciado de columnas de InDesign leído como error.
+            if self._RE_TABULACION.search(texto):
+                descartar("tabulacion_espaciado")
+                continue
 
             resultado.append(h)
 
