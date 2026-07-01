@@ -45,8 +45,11 @@ def test_estima_por_pagina_y_proveedor():
     est = estimar_revision_pdf(10, "claude")
     assert est.n_paginas == 10
     assert est.modelo == "claude-sonnet-4-6"
-    assert est.tokens_output == 10 * 4000
+    # La salida esperada usa ~600 tok/página (JSON de hallazgos), no el techo.
+    assert est.tokens_output == 10 * 600
     assert est.costo_usd > 0
+    # El máximo (techo 4000 tok/pág) debe ser mayor que el esperado.
+    assert est.costo_maximo_usd > est.costo_usd
 
 
 def test_familia_mas_larga_no_se_confunde():

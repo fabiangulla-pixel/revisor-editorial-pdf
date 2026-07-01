@@ -143,6 +143,9 @@ class EstimacionCosto:
     costo_usd: float
     modelo_catalogado: bool
     es_local: bool = False
+    # Costo si el modelo llenara el techo de max_tokens en cada página (cota
+    # superior). El costo_usd es el ESPERADO (salida típica observada).
+    costo_maximo_usd: float = 0.0
     notas: list[str] = field(default_factory=list)
 
     @property
@@ -163,8 +166,16 @@ class EstimacionCosto:
             f"Tokens estimados de salida:   {self.tokens_output:,}",
             f"Tokens totales (aprox.):      {self.tokens_totales:,}",
             "",
-            f"COSTO ESTIMADO: ${self.costo_usd:,.4f} USD",
+            f"COSTO ESTIMADO (esperado): ${self.costo_usd:,.4f} USD",
         ]
+        if self.costo_maximo_usd > self.costo_usd:
+            lineas.append(
+                f"Máximo posible (raro):     ${self.costo_maximo_usd:,.4f} USD"
+            )
+            lineas.append(
+                "  (el máximo asume que cada página agota el límite de respuesta; "
+                "en la práctica el gasto se acerca al esperado)."
+            )
         if not self.modelo_catalogado:
             lineas.append("")
             lineas.append(
@@ -186,15 +197,19 @@ def estimar_revision_pdf(
     modelo: str | None = None,
     chars_sistema: int = 2500,
     chars_promedio_pagina: int = 2800,
-    tokens_salida_por_pagina: int = 4000,
+    tokens_salida_por_pagina: int = 600,
+    tokens_salida_max_por_pagina: int = 4000,
 ) -> EstimacionCosto:
     """Estima tokens y costo de revisar un PDF de `n_paginas` con texto.
 
     Alineado con `_proceso_revision`:
     - una llamada por página = prompt de sistema (perfil de estilo,
       `chars_sistema`) + texto de la página (`chars_promedio_pagina`);
-    - salida acotada por max_tokens (4000) por página. Cota superior: la
-      respuesta real (JSON de hallazgos) suele ser menor.
+    - la salida real es un JSON de pocos hallazgos: se estima en ~600 tokens/página
+      (`tokens_salida_por_pagina`, valor típico observado), NO en el techo de
+      max_tokens (`tokens_salida_max_por_pagina`=4000). El costo ESPERADO usa 600;
+      el `costo_maximo_usd` usa 4000 como cota superior por si una página llenara
+      el límite (raro).
 
     `proveedor` es la clave en minúsculas (openai/gemini/claude/perplexity/ollama).
     Si `modelo` es None se usa el por defecto de ese proveedor.
@@ -214,12 +229,15 @@ def estimar_revision_pdf(
     tokens_pagina = estimar_tokens("x" * chars_promedio_pagina)
     tokens_input = (tokens_sistema + tokens_pagina) * n_paginas
     tokens_output = tokens_salida_por_pagina * n_paginas
+    tokens_output_max = tokens_salida_max_por_pagina * n_paginas
     costo = _costo(tokens_input, tokens_output, precio)
+    costo_max = _costo(tokens_input, tokens_output_max, precio)
 
     notas: list[str] = []
     if proveedor == "perplexity" and n_paginas > 0:
         recargo = PERPLEXITY_FEE_POR_REQUEST * n_paginas
         costo += recargo
+        costo_max += recargo
         notas.append(
             f"+ tarifa de búsqueda Perplexity ≈ ${recargo:,.4f} "
             f"(${PERPLEXITY_FEE_POR_REQUEST}/página)."
@@ -230,7 +248,7 @@ def estimar_revision_pdf(
     return EstimacionCosto(
         proveedor=proveedor, modelo=modelo, n_paginas=n_paginas,
         tokens_input=tokens_input, tokens_output=tokens_output, costo_usd=costo,
-        modelo_catalogado=catalogado, notas=notas,
+        modelo_catalogado=catalogado, costo_maximo_usd=costo_max, notas=notas,
     )
 
 
