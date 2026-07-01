@@ -1276,7 +1276,12 @@ class AppCorrector(tk.Tk):
         row = ttk.Frame(lf_ollama)
         row.pack(fill="x", padx=10, pady=8)
         ttk.Label(row, text="Modelo:").pack(side="left")
-        self.cb_modelos_ollama = ttk.Combobox(row, textvariable=self.modelo_ollama, width=28)
+        self.cb_modelos_ollama = ttk.Combobox(
+            row,
+            textvariable=self.modelo_ollama,
+            values=self.modelos_ollama_sugeridos,
+            width=28,
+        )
         self.cb_modelos_ollama.pack(side="left", padx=8)
         ttk.Button(row, text="Detectar modelos", command=self._detectar_modelos_ollama).pack(
             side="left", padx=4
