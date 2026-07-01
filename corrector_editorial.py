@@ -167,6 +167,16 @@ Los siguientes NO son errores reales — son artefactos de extracción:
   - Tabulación o "espacio regular/consistente" entre columnas (créditos, ISSN, cabeceras) → es
     maquetación intencional de InDesign, no un error de espaciado.
 
+✗ PARTICIÓN DE PALABRA AL FINAL DE LÍNEA
+  - Una palabra cortada con guion al final del renglón ("distrib-", "Huma-", "ceremo-", "des-") es la
+    partición NORMAL que hace InDesign. En el impreso está perfecta; el guion solo se "ve" al extraer.
+    NO marques "eliminar el guion" ni "unir la palabra" por una partición de fin de línea.
+
+✗ ELEMENTOS REPETIDOS (CORNISA / CABECERA CORRIENTE)
+  - La cornisa (encabezado corriente: "NOVUM JUS", "enero–abril 2026", "E-ISSN…") se repite en CADA
+    página. Si tiene un problema, márcalo UNA sola vez (indicando "sistémico, aplica a todas las
+    cornisas"); NO lo marques en cada página.
+
 ✗ NO DIVAGUES: SOLO ERRORES CON CORRECCIÓN CONCRETA
   - NO generes hallazgos de "Verificar…", "Comprobar…", "Revisar visualmente…" sin una corrección
     concreta: eso es trabajo de un humano, no una marca de corrección de pruebas. Si no puedes proponer
@@ -1876,6 +1886,10 @@ class AppCorrector(tk.Tk):
     # Patrón de partición que PyMuPDF introduce al leer columnas justificadas:
     # "palabra- continuación" — guión pegado a la primera parte, espacio, resto en minúsculas.
     _RE_PARTICION_ARTEFACTO = re.compile(r"\b([a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{2,})-\s+([a-záéíóúüñ]{2,})\b")
+    # Fragmento que termina en guion ("distrib-", "Huma-", "ceremo-"): la marca cae
+    # solo sobre el trozo cortado al final de línea. Es partición de fin de línea
+    # (InDesign la compone bien), no un guion espurio. Calibrado con NovumJus V20N1.
+    _RE_FRAGMENTO_CORTE = re.compile(r"[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{2,}-\s*$")
 
     # Palabras clave en descripción/corrección que indican un error real a conservar
     _INDICADORES_ERROR_REAL = re.compile(
@@ -1907,6 +1921,7 @@ class AppCorrector(tk.Tk):
             certeza = h.get("certeza", "media")
 
             # ¿Es un hallazgo de partición de palabras?
+            texto_hall = desc + " " + corr
             es_particion = (
                 "partici" in desc
                 or "partición" in desc
@@ -1916,6 +1931,12 @@ class AppCorrector(tk.Tk):
                 or "dividid" in desc
                 or "truncad" in desc
                 or self._RE_PARTICION_ARTEFACTO.search(fragmento) is not None
+                # Fragmento cortado al final de línea ("distrib-", "Huma-") + el
+                # comentario habla de unir/guion → partición de fin de línea.
+                or (
+                    self._RE_FRAGMENTO_CORTE.search(fragmento) is not None
+                    and re.search(r"unir|sin guion|guion|palabra", texto_hall, re.I) is not None
+                )
             )
 
             if not es_particion:
@@ -2002,6 +2023,33 @@ class AppCorrector(tk.Tk):
         r"tabulaci[oó]n|espacio\s+regular|espacios?\s+espurios|una\s+sola\s+cadena",
         re.IGNORECASE,
     )
+    # El propio modelo se desautoriza ("no marcar", "descartar si no hay error",
+    # "no verificable"): no debe dejar una marca. Calibrado con NovumJus.
+    _RE_AUTODESCARTE = re.compile(
+        r"no\s+marcar|no\s+verificable|descartar\s+si|si\s+no\s+hay\s+error(?:\s+visible)?"
+        r"|no\s+se\s+corrige\s+contenido",
+        re.IGNORECASE,
+    )
+    # Instrucción de maquetación al diagramador (recomponer/alinear/paginar/mover):
+    # es composición, no corrección del texto. NO incluye "unir" a secas (eso puede
+    # ser corrección ortográfica); solo instrucciones de recomposición.
+    _RE_MAQUETACION = re.compile(
+        r"recompon|reponer\s+la\s+composici|alinea[rn]|super[ií]ndice|en\s+la\s+misma\s+l[ií]nea"
+        r"|composici[oó]n\s+del|ajustar\s+corte|continuar\s+el\s+t[ií]tulo|reajustar\s+paginaci"
+        r"|mover\s+«|restituir\s+en\s+el\s+pie|marcador\s+de\s+nota",
+        re.IGNORECASE,
+    )
+    # Viñeta o glifo suelto de tabla/cabecera (•, marcador de fuente): artefacto de
+    # extracción, no error del impreso.
+    _RE_GLIFO_SUELTO = re.compile(
+        r"vi[nñ]eta|glifos?\s+espurios|«•»|“•”|separador(?:es)?\s+duplicad|marcador\s+\[",
+        re.IGNORECASE,
+    )
+    # Cornisa / cabecera corriente (se repite en cada página): se marca UNA vez.
+    _RE_CORNISA = re.compile(
+        r"enero.?abril\s+20\d\d|novum\s?jus|e-?issn|issn:|cornisa|encabezado\s+corriente",
+        re.IGNORECASE,
+    )
 
     _ITALIC_FLAG = 2  # bit 1 de span["flags"] en PyMuPDF
 
@@ -2083,6 +2131,7 @@ class AppCorrector(tk.Tk):
         alto_pag = {i: doc[i].rect.height for i in range(doc.page_count)}
         resultado = []
         motivos = {}
+        cornisa_ya_marcada = False  # la cornisa se marca UNA vez, no en cada página
 
         def descartar(motivo):
             motivos[motivo] = motivos.get(motivo, 0) + 1
@@ -2203,6 +2252,31 @@ class AppCorrector(tk.Tk):
             if self._RE_TABULACION.search(texto):
                 descartar("tabulacion_espaciado")
                 continue
+
+            # 14. El modelo se desautoriza ("no marcar", "descartar si no hay error").
+            if self._RE_AUTODESCARTE.search(texto):
+                descartar("autodescarte_modelo")
+                continue
+
+            # 15. Instrucción de maquetación/recomposición al diagramador.
+            if self._RE_MAQUETACION.search(texto):
+                descartar("maquetacion_diagramador")
+                continue
+
+            # 16. Viñeta o glifo suelto de tabla/cabecera = artefacto de extracción.
+            if self._RE_GLIFO_SUELTO.search(texto):
+                descartar("glifo_o_vineta_suelta")
+                continue
+
+            # 17. Cornisa/cabecera corriente: se conserva la PRIMERA aparición (para
+            #     que el corrector sepa que hay que arreglarla) y se descartan las
+            #     repeticiones en el resto de páginas. Solo si no trae una corrección
+            #     de texto concreta (Reemp: de una palabra ajena a la cabecera).
+            if self._RE_CORNISA.search(f"{frag} {texto}") and "reemp" not in texto.lower():
+                if cornisa_ya_marcada:
+                    descartar("cornisa_repetida")
+                    continue
+                cornisa_ya_marcada = True
 
             resultado.append(h)
 
