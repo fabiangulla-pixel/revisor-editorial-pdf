@@ -441,7 +441,7 @@ class OllamaLocal(ProveedorLLM):
 
 
 class OpenAIProveedor(ProveedorLLM):
-    def __init__(self, api_key: str, modelo: str = "gpt-4o"):
+    def __init__(self, api_key: str, modelo: str = "gpt-5.4"):
         import openai
 
         self.cliente = openai.OpenAI(api_key=api_key)
@@ -1015,6 +1015,10 @@ class AppCorrector(tk.Tk):
         self.minsize(860, 600)
         self.configure(bg="#1e1e2e")
 
+        from costos import MODELOS_DISPONIBLES
+
+        self.modelos_disponibles = MODELOS_DISPONIBLES
+
         self.ruta_pdf = tk.StringVar()
         self.proveedor_sel = tk.StringVar(value=self.PROVEEDORES[0])
         self.modelo_ollama = tk.StringVar(value="llama3.1")
@@ -1022,6 +1026,11 @@ class AppCorrector(tk.Tk):
         self.key_gemini = tk.StringVar()
         self.key_claude = tk.StringVar()
         self.key_perplexity = tk.StringVar()
+        # Modelo elegido por proveedor de pago (por defecto: el primero del catálogo).
+        self.modelo_openai = tk.StringVar(value=MODELOS_DISPONIBLES["openai"][0])
+        self.modelo_gemini = tk.StringVar(value=MODELOS_DISPONIBLES["gemini"][0])
+        self.modelo_claude = tk.StringVar(value=MODELOS_DISPONIBLES["claude"][0])
+        self.modelo_perplexity = tk.StringVar(value=MODELOS_DISPONIBLES["perplexity"][0])
         self.autor = tk.StringVar(value="Corrector IA")
 
         self.perfil = PerfilEstilo()
@@ -1259,20 +1268,29 @@ class AppCorrector(tk.Tk):
         self.lbl_ollama_status = ttk.Label(lf_ollama, text="")
         self.lbl_ollama_status.pack(padx=10, pady=(0, 6))
 
-        lf_api = ttk.LabelFrame(parent, text="APIs opcionales")
+        lf_api = ttk.LabelFrame(parent, text="APIs opcionales (elige el modelo por proveedor)")
         lf_api.pack(fill="x", **pad)
-        for label, var in [
-            ("OpenAI (GPT-4o)", self.key_openai),
-            ("Google Gemini", self.key_gemini),
-            ("Anthropic Claude", self.key_claude),
-            ("Perplexity", self.key_perplexity),
+        for label, var, prov, modelo_var in [
+            ("OpenAI", self.key_openai, "openai", self.modelo_openai),
+            ("Google Gemini", self.key_gemini, "gemini", self.modelo_gemini),
+            ("Anthropic Claude", self.key_claude, "claude", self.modelo_claude),
+            ("Perplexity", self.key_perplexity, "perplexity", self.modelo_perplexity),
         ]:
             row = ttk.Frame(lf_api)
             row.pack(fill="x", padx=10, pady=4)
-            ttk.Label(row, text=f"{label}:", width=22).pack(side="left")
-            ttk.Entry(row, textvariable=var, show="•", width=50).pack(
+            ttk.Label(row, text=f"{label}:", width=16).pack(side="left")
+            ttk.Entry(row, textvariable=var, show="•", width=38).pack(
                 side="left", fill="x", expand=True
             )
+            ttk.Label(row, text="Modelo:").pack(side="left", padx=(8, 2))
+            # Combobox editable: por si el usuario quiere teclear un modelo nuevo
+            # que aún no esté en el catálogo.
+            ttk.Combobox(
+                row,
+                textvariable=modelo_var,
+                values=self.modelos_disponibles.get(prov, []),
+                width=22,
+            ).pack(side="left")
 
         lf_autor = ttk.LabelFrame(parent, text="Corrector")
         lf_autor.pack(fill="x", **pad)
@@ -1536,22 +1554,22 @@ class AppCorrector(tk.Tk):
             k = self.key_openai.get().strip()
             if not k:
                 raise ValueError("Ingresa tu OpenAI API key.")
-            return OpenAIProveedor(api_key=k)
+            return OpenAIProveedor(api_key=k, modelo=self.modelo_openai.get().strip())
         elif "Gemini" in sel:
             k = self.key_gemini.get().strip()
             if not k:
                 raise ValueError("Ingresa tu Google API key.")
-            return GeminiProveedor(api_key=k)
+            return GeminiProveedor(api_key=k, modelo=self.modelo_gemini.get().strip())
         elif "Claude" in sel:
             k = self.key_claude.get().strip()
             if not k:
                 raise ValueError("Ingresa tu Anthropic API key.")
-            return ClaudeProveedor(api_key=k)
+            return ClaudeProveedor(api_key=k, modelo=self.modelo_claude.get().strip())
         elif "Perplexity" in sel:
             k = self.key_perplexity.get().strip()
             if not k:
                 raise ValueError("Ingresa tu Perplexity API key.")
-            return PerplexityProveedor(api_key=k)
+            return PerplexityProveedor(api_key=k, modelo=self.modelo_perplexity.get().strip())
         return OllamaLocal(modelo=self.modelo_ollama.get())
 
     def _verificar_motor(self):
@@ -1615,6 +1633,15 @@ class AppCorrector(tk.Tk):
                 prov_key = "ollama"
             else:
                 prov_key = next((p for p in MODELO_DEFAULT if p in sel), "")
+            # Modelo elegido por el usuario para ese proveedor (para estimar el
+            # costo del modelo REAL, no del default).
+            modelo_elegido = {
+                "openai": self.modelo_openai,
+                "gemini": self.modelo_gemini,
+                "claude": self.modelo_claude,
+                "perplexity": self.modelo_perplexity,
+            }.get(prov_key)
+            modelo_prev = modelo_elegido.get().strip() if modelo_elegido else None
             analizador_prev = AnalizadorPDF(ruta)
             total_pag = analizador_prev.num_paginas()
             n_texto = 0
@@ -1624,7 +1651,7 @@ class AppCorrector(tk.Tk):
                         n_texto += 1
                 except Exception:
                     n_texto += 1  # ante la duda, contar (cota superior)
-            est = estimar_revision_pdf(n_texto, prov_key)
+            est = estimar_revision_pdf(n_texto, prov_key, modelo=modelo_prev)
             if not messagebox.askyesno(
                 "Revisar con IA — costo estimado",
                 est.resumen() + "\n\n¿Iniciar la revisión?",

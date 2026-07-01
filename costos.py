@@ -11,15 +11,19 @@ Ollama-local) y procesa el PDF PÁGINA A PÁGINA: una llamada por página, cada 
 con el prompt de sistema (perfil de estilo) + el texto de la página. Solo texto
 (no visión). NO usar tiktoken (es de OpenAI y subcuenta los tokens de Claude).
 
-Precios (USD por 1M de tokens), verificados:
-- Claude (skill claude-api, cache 2026-06-30): opus-4-8 $5/$25, sonnet-4-6 $3/$15
-  (por defecto), haiku-4-5 $1/$5.
-- OpenAI (web 2026-06-30): gpt-4o $2.50/$10, gpt-4o-mini $0.15/$0.60.
-- Gemini (web 2026-06-30): 2.5-flash $0.30/$2.50 (por defecto), 2.5-flash-lite
-  $0.10/$0.40. ¡OJO! 2.0-flash y 1.5-flash quedaron DESCONTINUADOS (2.0-flash se
-  apagó el 1-jun-2026); se conservan abajo solo como respaldo histórico.
-- Perplexity (web 2026-06-30): sonar-pro $3/$15 + tarifa de búsqueda
-  ~$6-14/1000 requests (se aproxima $0.010/página como recargo); sonar $1/$1.
+Precios (USD por 1M de tokens), verificados en la web el 2026-06-30:
+- Claude: fable-5 $10/$50, opus-4-8 $5/$25, sonnet-4-6 $3/$15 (por defecto),
+  haiku-4-5 $1/$5.
+- OpenAI: gpt-5.5 $5/$30, gpt-5.4 $2.50/$15 (por defecto), gpt-5.4-mini $0.50/$3,
+  gpt-5.4-nano $0.20/$1.25. ¡OJO! gpt-4o quedó DESCONTINUADO (sucedido por la
+  familia GPT-5.4/5.5); se conserva abajo solo como respaldo histórico.
+- Gemini: 3-pro $2/$12, 3.5-flash $1.50/$9, 2.5-pro $1.25/$10, 2.5-flash
+  $0.30/$2.50 (por defecto), 2.5-flash-lite $0.10/$0.40. ¡OJO! 2.0-flash y
+  1.5-flash quedaron DESCONTINUADOS (2.0-flash se apagó el 1-jun-2026); se
+  conservan abajo solo como respaldo histórico.
+- Perplexity: sonar-pro $3/$15 (por defecto), sonar $1/$1, sonar-reasoning $1/$5,
+  sonar-reasoning-pro $2/$8; + tarifa de búsqueda ~$6-14/1000 requests (se
+  aproxima $0.010/página como recargo).
 - Ollama: LOCAL, costo 0.
 """
 
@@ -40,14 +44,24 @@ class PrecioModelo:
 
 
 PRECIOS: dict[str, PrecioModelo] = {
-    # Claude
+    # Claude (vigentes)
+    "claude-fable-5": PrecioModelo(10.00, 50.00),
     "claude-opus-4-8": PrecioModelo(5.00, 25.00),
+    "claude-opus-4-7": PrecioModelo(5.00, 25.00),
     "claude-sonnet-4-6": PrecioModelo(3.00, 15.00),
     "claude-haiku-4-5": PrecioModelo(1.00, 5.00),
-    # OpenAI
+    # OpenAI (vigentes — familia GPT-5.5/5.4)
+    "gpt-5.5": PrecioModelo(5.00, 30.00),
+    "gpt-5.4-nano": PrecioModelo(0.20, 1.25),
+    "gpt-5.4-mini": PrecioModelo(0.50, 3.00),
+    "gpt-5.4": PrecioModelo(2.50, 15.00),
+    # OpenAI (descontinuados — respaldo histórico, no usar como default)
     "gpt-4o-mini": PrecioModelo(0.15, 0.60),
     "gpt-4o": PrecioModelo(2.50, 10.00),
     # Gemini (vigentes)
+    "gemini-3-pro": PrecioModelo(2.00, 12.00),
+    "gemini-3.5-flash": PrecioModelo(1.50, 9.00),
+    "gemini-2.5-pro": PrecioModelo(1.25, 10.00),
     "gemini-2.5-flash": PrecioModelo(0.30, 2.50),
     "gemini-2.5-flash-lite": PrecioModelo(0.10, 0.40),
     # Gemini (descontinuados — respaldo histórico, no usar como default)
@@ -55,6 +69,8 @@ PRECIOS: dict[str, PrecioModelo] = {
     "gemini-1.5-flash": PrecioModelo(0.075, 0.30),
     "gemini-1.5-pro": PrecioModelo(1.25, 5.00),
     # Perplexity
+    "sonar-reasoning-pro": PrecioModelo(2.00, 8.00),
+    "sonar-reasoning": PrecioModelo(1.00, 5.00),
     "sonar-pro": PrecioModelo(3.00, 15.00),
     "sonar": PrecioModelo(1.00, 1.00),
 }
@@ -63,10 +79,30 @@ PROVEEDORES_LOCALES = {"ollama"}
 
 # Modelo por defecto de cada proveedor (alineado con las clases ProveedorLLM).
 MODELO_DEFAULT = {
-    "openai": "gpt-4o",
+    "openai": "gpt-5.4",
     "gemini": "gemini-2.5-flash",
     "claude": "claude-sonnet-4-6",
     "perplexity": "sonar-pro",
+}
+
+# Catálogo de modelos VIGENTES ofrecidos en la GUI por proveedor (el primero es el
+# por defecto). Se listan de más capaz/caro a más barato. Verificados 2026-06-30.
+MODELOS_DISPONIBLES = {
+    "openai": ["gpt-5.4", "gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"],
+    "gemini": [
+        "gemini-2.5-flash",
+        "gemini-3-pro",
+        "gemini-3.5-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash-lite",
+    ],
+    "claude": [
+        "claude-sonnet-4-6",
+        "claude-opus-4-8",
+        "claude-haiku-4-5",
+        "claude-fable-5",
+    ],
+    "perplexity": ["sonar-pro", "sonar", "sonar-reasoning", "sonar-reasoning-pro"],
 }
 
 

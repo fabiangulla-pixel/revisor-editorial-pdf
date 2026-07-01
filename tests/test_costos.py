@@ -24,7 +24,21 @@ def test_precios_clave():
 
 def test_modelo_default_por_proveedor():
     assert MODELO_DEFAULT["claude"] == "claude-sonnet-4-6"
-    assert MODELO_DEFAULT["openai"] == "gpt-4o"
+    # gpt-4o quedó descontinuado; el default de OpenAI es la familia GPT-5.4.
+    assert MODELO_DEFAULT["openai"] == "gpt-5.4"
+
+
+def test_catalogo_modelos_disponibles():
+    from costos import MODELOS_DISPONIBLES, _precio_de
+
+    # El default de cada proveedor debe ser el primero de su catálogo vigente.
+    for prov, modelos in MODELOS_DISPONIBLES.items():
+        assert modelos, f"{prov} sin modelos"
+        assert MODELO_DEFAULT[prov] == modelos[0]
+        # Todo modelo ofrecido debe tener precio catalogado (no caer en la cota).
+        for m in modelos:
+            _, catalogado = _precio_de(m)
+            assert catalogado, f"{m} no tiene precio catalogado"
 
 
 def test_estima_por_pagina_y_proveedor():
