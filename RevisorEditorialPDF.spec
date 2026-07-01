@@ -5,9 +5,13 @@ datas = []
 binaries = []
 # 'costos' = módulo de estimación de costo IA (import diferido dentro de funciones,
 # PyInstaller no lo detecta solo → declararlo explícitamente).
+# Los SDK de IA (openai, google.generativeai, anthropic) también se importan
+# de forma diferida dentro de cada clase de proveedor, así que hay que
+# recogerlos explícitamente o el .exe falla al elegir ese proveedor.
 hiddenimports = ['tkinter', 'tkinter.ttk', 'tkinter.filedialog', 'tkinter.messagebox', 'tkinter.scrolledtext', 'fitz', 'dotenv', 'requests', 'costos']
-tmp_ret = collect_all('fitz')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+for _pkg in ('fitz', 'openai', 'google.generativeai', 'anthropic'):
+    tmp_ret = collect_all(_pkg)
+    datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
