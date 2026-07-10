@@ -496,9 +496,7 @@ class OpenAIProveedor(ProveedorLLM):
             response_format={"type": "json_object"},
         )
         try:
-            resp = self.cliente.chat.completions.create(
-                **base, max_completion_tokens=4000
-            )
+            resp = self.cliente.chat.completions.create(**base, max_completion_tokens=4000)
         except Exception as e:
             msg = str(e).lower()
             if "max_completion_tokens" in msg or "max_tokens" in msg or "temperature" in msg:
@@ -1810,8 +1808,10 @@ class AppCorrector(tk.Tk):
                 from costos import MODELO_DEFAULT, costo_real_desde_usages
 
                 sel = self.proveedor_sel.get().lower()
-                prov_key = "ollama" if "ollama" in sel else next(
-                    (p for p in MODELO_DEFAULT if p in sel), ""
+                prov_key = (
+                    "ollama"
+                    if "ollama" in sel
+                    else next((p for p in MODELO_DEFAULT if p in sel), "")
                 )
                 modelo_ref = getattr(proveedor, "modelo", "") or MODELO_DEFAULT.get(prov_key, "")
                 real = costo_real_desde_usages(prov_key, modelo_ref, proveedor.usages or [])

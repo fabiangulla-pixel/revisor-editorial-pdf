@@ -112,15 +112,15 @@ MODELOS_DISPONIBLES = {
 # como primer barrido. Es solo una lista de conveniencia: el combobox es editable y
 # "Detectar modelos" trae los realmente instalados.
 MODELOS_OLLAMA_SUGERIDOS = [
-    "qwen2.5:72b",       # calidad ~API, para equipos con mucha memoria (DGX Spark)
-    "llama3.3:70b",      # alternativa 70B, excelente seguimiento de instrucciones
-    "qwen2.5:32b",       # muy alta calidad, más liviano que 72b
-    "gemma3:12b",        # buen equilibrio calidad/tamaño
-    "qwen2.5:14b",       # punto dulce con GPU de 16 GB
-    "qwen2.5:7b",        # usable en equipos de gama media
-    "gemma3:4b",         # primer barrido en equipos modestos (7-8 GB RAM)
-    "qwen2.5:3b",        # el más liviano
-    "llama3.1",          # genérico de respaldo
+    "qwen2.5:72b",  # calidad ~API, para equipos con mucha memoria (DGX Spark)
+    "llama3.3:70b",  # alternativa 70B, excelente seguimiento de instrucciones
+    "qwen2.5:32b",  # muy alta calidad, más liviano que 72b
+    "gemma3:12b",  # buen equilibrio calidad/tamaño
+    "qwen2.5:14b",  # punto dulce con GPU de 16 GB
+    "qwen2.5:7b",  # usable en equipos de gama media
+    "gemma3:4b",  # primer barrido en equipos modestos (7-8 GB RAM)
+    "qwen2.5:3b",  # el más liviano
+    "llama3.1",  # genérico de respaldo
 ]
 
 
@@ -187,9 +187,7 @@ class EstimacionCosto:
             f"COSTO ESTIMADO (esperado): ${self.costo_usd:,.4f} USD",
         ]
         if self.costo_maximo_usd > self.costo_usd:
-            lineas.append(
-                f"Máximo posible (raro):     ${self.costo_maximo_usd:,.4f} USD"
-            )
+            lineas.append(f"Máximo posible (raro):     ${self.costo_maximo_usd:,.4f} USD")
             lineas.append(
                 "  (el máximo asume que cada página agota el límite de respuesta; "
                 "en la práctica el gasto se acerca al esperado)."
@@ -235,9 +233,14 @@ def estimar_revision_pdf(
     proveedor = (proveedor or "").strip().lower()
     if proveedor in PROVEEDORES_LOCALES:
         return EstimacionCosto(
-            proveedor=proveedor, modelo=modelo or "local", n_paginas=n_paginas,
-            tokens_input=0, tokens_output=0, costo_usd=0.0,
-            modelo_catalogado=True, es_local=True,
+            proveedor=proveedor,
+            modelo=modelo or "local",
+            n_paginas=n_paginas,
+            tokens_input=0,
+            tokens_output=0,
+            costo_usd=0.0,
+            modelo_catalogado=True,
+            es_local=True,
         )
 
     modelo = modelo or MODELO_DEFAULT.get(proveedor, "")
@@ -264,9 +267,15 @@ def estimar_revision_pdf(
         notas.append("El PDF no tiene páginas con texto: nada que revisar.")
 
     return EstimacionCosto(
-        proveedor=proveedor, modelo=modelo, n_paginas=n_paginas,
-        tokens_input=tokens_input, tokens_output=tokens_output, costo_usd=costo,
-        modelo_catalogado=catalogado, costo_maximo_usd=costo_max, notas=notas,
+        proveedor=proveedor,
+        modelo=modelo,
+        n_paginas=n_paginas,
+        tokens_input=tokens_input,
+        tokens_output=tokens_output,
+        costo_usd=costo,
+        modelo_catalogado=catalogado,
+        costo_maximo_usd=costo_max,
+        notas=notas,
     )
 
 
@@ -310,15 +319,16 @@ def costo_real_desde_usages(proveedor: str, modelo: str, usages: list) -> CostoR
     tokens_in = 0
     tokens_out = 0
     for u in usages:
-        tokens_in += (
-            _g(u, "input_tokens", "prompt_tokens", "prompt_token_count")
-            + _g(u, "cache_creation_input_tokens")
+        tokens_in += _g(u, "input_tokens", "prompt_tokens", "prompt_token_count") + _g(
+            u, "cache_creation_input_tokens"
         )
         tokens_out += _g(u, "output_tokens", "completion_tokens", "candidates_token_count")
 
     return CostoReal(
-        proveedor=proveedor, modelo=modelo,
-        tokens_input=tokens_in, tokens_output=tokens_out,
+        proveedor=proveedor,
+        modelo=modelo,
+        tokens_input=tokens_in,
+        tokens_output=tokens_out,
         costo_usd=_costo(tokens_in, tokens_out, precio),
         modelo_catalogado=catalogado,
     )

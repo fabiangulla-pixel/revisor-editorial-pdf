@@ -86,8 +86,8 @@ def test_pdf_vacio():
 
 def test_costo_real_tres_formatos_de_usage():
     usages = [
-        {"input_tokens": 1_000_000, "output_tokens": 0},          # Anthropic
-        {"prompt_tokens": 0, "completion_tokens": 500_000},        # OpenAI
+        {"input_tokens": 1_000_000, "output_tokens": 0},  # Anthropic
+        {"prompt_tokens": 0, "completion_tokens": 500_000},  # OpenAI
         {"prompt_token_count": 0, "candidates_token_count": 500_000},  # Gemini
     ]
     # claude-sonnet-4-6: $3 in / $15 out. 1M in=$3, 1M out=$15 → $18.
