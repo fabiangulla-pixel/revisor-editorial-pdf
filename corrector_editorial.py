@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import tkinter as tk
+import unicodedata
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -1916,9 +1917,30 @@ class AppCorrector(tk.Tk):
             desc = h.get("descripcion", "").lower()
             corr = h.get("correccion", "").lower()
             fragmento = h.get("fragmento", "")
+            correccion = h.get("correccion", "")
             categoria = h.get("categoria", "")
             gravedad = h.get("gravedad", "menor")
             certeza = h.get("certeza", "media")
+
+            # La "corrección" solo quita/reordena espacios, o cierra un guion de
+            # corte de fin de línea, y el resultado queda idéntico al fragmento:
+            # no hay error real, es el salto de línea de una columna justificada
+            # (o de una URL/DOI partida) leído como espacio o guion espurio.
+            # Se comprueba ANTES de certeza/gravedad porque el modelo declara
+            # certeza alta en casi todos los casos (calibrado con NovumJus V19N3:
+            # 1221/1244 hallazgos con certeza alta), así que esa señal no sirve
+            # para distinguir artefacto de error real en esta familia.
+            # NFC antes de comparar: PyMuPDF a veces extrae la vocal acentuada
+            # descompuesta (letra + acento combinante) y el LLM la corrige
+            # compuesta; son el mismo texto visualmente ("tilde compuesta").
+            frag_nfc = unicodedata.normalize("NFC", fragmento)
+            corr_nfc = unicodedata.normalize("NFC", correccion)
+            frag_sin_espacios = re.sub(r"\s+", "", frag_nfc)
+            corr_sin_espacios = re.sub(r"\s+", "", corr_nfc)
+            frag_sin_guion = re.sub(r"\s+", "", re.sub(r"-\s*", "", frag_nfc))
+            if frag_sin_espacios and corr_sin_espacios:
+                if frag_sin_espacios == corr_sin_espacios or frag_sin_guion == corr_sin_espacios:
+                    continue
 
             # ¿Es un hallazgo de partición de palabras?
             texto_hall = desc + " " + corr
@@ -1992,9 +2014,55 @@ class AppCorrector(tk.Tk):
     # "Eliminar/quitar espacio" referido a una URL/DOI: la URL se parte por salto de
     # línea al extraer y el modelo cree que hay un espacio espurio dentro del enlace.
     # En el PDF real lo que precede a https:// es la coma/punto de la referencia.
+    # Cubre los dos órdenes ("espacio espurio en la URL" y "URL... espacio") porque
+    # la redacción varía; calibrado con NovumJus V19N3 (~120 casos con "espurio"
+    # en singular, que la primera versión de este patrón no cubría).
     _RE_ESPACIO_ENLACE = re.compile(
         r"(?:elimin|quit).{0,20}espacio.{0,40}(?:https?|doi|url|://|enlace)"
-        r"|(?:https?|doi|url|://).{0,40}espacio",
+        r"|(?:https?|doi|url|://).{0,40}espaci"
+        r"|espaci\w*.{0,15}espuri\w*.{0,30}(?:https?|doi|\burl\b|enlace)"
+        r"|(?:https?|doi|\burl\b).{0,30}espaci\w*.{0,15}espuri\w*"
+        # Misma familia sin la palabra "espacio": la url/doi/enlace se reporta
+        # partida, cortada o truncada por el mismo salto de línea, o con un
+        # guion/punto espurio de fin de línea colado en el dominio.
+        r"|(?:\burl\b|doi|enlace).{0,20}(?:partid\w*|cortad\w*|truncad\w*)"
+        r"|(?:doi|\burl\b).{0,20}punto\s+final\s+espuri\w*"
+        r"|guion\s+espuri\w*.{0,20}(?:\burl\b|partici[oó]n.{0,10}url)",
+        re.IGNORECASE,
+    )
+    # Espacio/coma/punto "espurio", "sobrante" o "indebido" alrededor de un signo de
+    # puntuación: artefacto de columna justificada (la línea corta justo antes del
+    # signo). No es un DOI/URL pero es la misma familia de ruido de extracción.
+    # Calibrado con NovumJus V19N3 (revista con muchas referencias numeradas).
+    _RE_ESPACIO_PUNTUACION = re.compile(
+        r"espaci\w*\s+(?:espuri\w*|sobrante\w*|indebid\w*|irregular\w*|an[oó]mal\w*)"
+        r"|(?:coma|punto)\s+(?:espuri\w*|sobrante\w*|separad\w*)"
+        r"|espacio\s+(?:antes|despu[eé]s)\s+(?:del?\s+)?(?:punto|coma|%|nota)"
+        r"|barra\s+sobrante",
+        re.IGNORECASE,
+    )
+    # Notas al pie "corridas", "incrustadas", "descolocadas", etc.: PyMuPDF extrae
+    # el texto por bloques y el llamado de nota (superíndice) o el cuerpo de la
+    # nota terminan intercalados con el cuerpo en el orden de lectura, aunque en
+    # el PDF real estén correctamente compuestos (llamado en superíndice, nota al
+    # pie separada por regla). Calibrado con NovumJus V19N3: verificado contra el
+    # PDF real (págs. 32 y 427) que las notas 13/14 y 98-101 estaban bien
+    # compuestas — el modelo las reportó igual por el orden de extracción, no por
+    # un defecto de composición.
+    _RE_NOTA_EXTRACCION = re.compile(
+        r"nota\s+(?:al\s+pie\s+|de\s+pie\s+)?(?:corrid\w*|incrustad\w*|descolocad\w*|"
+        r"duplicad\w*|flotante\w*|pegad\w*|mal\s+compuest\w*|mal\s+captur\w*|"
+        r"mal\s+anclad\w*|cortad\w*|cruzad\w*|repetid\w*|arrancad\w*|hu[eé]rfan\w*|"
+        r"aislad\w*|perdid\w*)"
+        r"|llamada\s+(?:de\s+nota\s+)?(?:corrid\w*|incrustad\w*|pegad\w*|aislad\w*|"
+        r"hu[eé]rfan\w*)"
+        r"|folio\s+de\s+nota|folio/nota|nota/folio|folio.{0,20}nota\s+pegad\w*"
+        r"|n[uú]mero\s+de\s+nota\s+repetid\w*"
+        r"|falta\s+(?:punto|separador|p[aá]rrafo\s+aparte)\s+"
+        r"(?:tras\s+la\s+nota|de\s+nota|entre\s+notas)"
+        r"|inicio\s+de\s+nota\s+perdid\w*"
+        r"|referencia\s+cortada\s+en\s+cabecera\s+de\s+nota"
+        r"|resto\s+de\s+nota\s+arrancad\w*",
         re.IGNORECASE,
     )
     # "Verificar/comprobar/revisar visualmente…" SIN una corrección concreta:
@@ -2027,7 +2095,7 @@ class AppCorrector(tk.Tk):
     # "no verificable"): no debe dejar una marca. Calibrado con NovumJus.
     _RE_AUTODESCARTE = re.compile(
         r"no\s+marcar|no\s+verificable|descartar\s+si|si\s+no\s+hay\s+error(?:\s+visible)?"
-        r"|no\s+se\s+corrige\s+contenido",
+        r"|no\s+se\s+corrige\s+contenido|v[aá]lid[ao]\s+no\s+reportar|no\s+reportar",
         re.IGNORECASE,
     )
     # Instrucción de maquetación al diagramador (recomponer/alinear/paginar/mover):
@@ -2139,6 +2207,7 @@ class AppCorrector(tk.Tk):
         for h in hallazgos:
             desc = h.get("descripcion", "")
             frag = h.get("fragmento", "")
+            correccion_h = h.get("correccion", "")
             idx = h.get("pagina", 1) - 1
 
             # 1. Letterspacing de títulos (mayúscula suelta + espacio en el fragmento)
@@ -2173,9 +2242,17 @@ class AppCorrector(tk.Tk):
             #    incorrectas, deben ser latinas", "inglesas → latinas"...), así
             #    que se busca la intención, no un orden fijo de palabras.
             if "comilla" in desc.lower():
-                d = desc.lower()
-                pide_latinas = "latina" in d
-                pide_inglesas = "ser inglesa" in d or "ser comillas inglesa" in d
+                d = (desc + " " + correccion_h).lower()
+                # La propuesta suele venir en la corrección como «…»/" "…" ",
+                # no como la palabra "latina" en la descripción (p. ej. desc=
+                # "comillas inglesas", corrección="«ciudadanos tecnológicos»").
+                pide_latinas = "latina" in d or "«" in correccion_h or "»" in correccion_h
+                pide_inglesas = (
+                    "ser inglesa" in d
+                    or "ser comillas inglesa" in d
+                    or "“" in correccion_h
+                    or "”" in correccion_h
+                )
                 if norma_comillas == "inglesas" and pide_latinas and not pide_inglesas:
                     descartar("comillas_norma_documento")
                     continue
@@ -2229,7 +2306,13 @@ class AppCorrector(tk.Tk):
 
             # 9. "Verificar/comprobar…" sin corrección concreta = dato a revisar por
             #    un humano, no un error tipográfico. Si trae "Reemp:" se conserva.
-            if self._RE_VERIFICAR.search(texto) and "reemp" not in texto.lower():
+            #    Se prueba desc y corrección por separado (no solo concatenadas)
+            #    porque el "^" del patrón solo ancla al inicio del texto que se
+            #    le pase: si la instrucción "verificar…" está en la corrección
+            #    (desc distinta), la concatenación desc+corrección no la detecta.
+            if (
+                self._RE_VERIFICAR.search(desc) or self._RE_VERIFICAR.search(correccion_h)
+            ) and "reemp" not in texto.lower():
                 descartar("verificar_sin_correccion")
                 continue
 
@@ -2251,6 +2334,14 @@ class AppCorrector(tk.Tk):
             # 13. Tabulación/espaciado de columnas de InDesign leído como error.
             if self._RE_TABULACION.search(texto):
                 descartar("tabulacion_espaciado")
+                continue
+
+            # 13b. Espacio/coma/punto "espurio"/"sobrante" alrededor de un signo
+            #      de puntuación: salto de línea de columna justificada.
+            if self._RE_ESPACIO_PUNTUACION.search(desc) and not self._INDICADORES_ERROR_REAL.search(
+                texto
+            ):
+                descartar("espacio_puntuacion_columna")
                 continue
 
             # 14. El modelo se desautoriza ("no marcar", "descartar si no hay error").
@@ -2277,6 +2368,13 @@ class AppCorrector(tk.Tk):
                     descartar("cornisa_repetida")
                     continue
                 cornisa_ya_marcada = True
+
+            # 18. Nota al pie/llamada de nota "corrida", "incrustada", "duplicada",
+            #     etc.: orden de extracción de PyMuPDF, no defecto de composición
+            #     real (ver docstring de _RE_NOTA_EXTRACCION).
+            if self._RE_NOTA_EXTRACCION.search(desc):
+                descartar("nota_orden_extraccion")
+                continue
 
             resultado.append(h)
 
