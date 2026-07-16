@@ -20,6 +20,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter import font as tkfont
 from xml.dom import minidom
 
 import fitz  # PyMuPDF
@@ -762,6 +763,154 @@ ASUNTOS = {
     "preliminares_finales": "Preliminares/Finales",
 }
 
+# Registro de reglas del filtro de falsos positivos, como datos puros (id,
+# grupo, etiqueta, descripción) para poder generar la pestaña "Ajustes de
+# filtrado" de la GUI y persistir qué reglas están activas sin tocar la
+# lógica de _filtrar_particiones/_filtrar_falsos_positivos. Cada id coincide
+# con el "motivo" que esas funciones ya usaban para loguear descartes.
+REGLAS_FILTRO: list[tuple[str, str, str, str]] = [
+    (
+        "particion_estructural",
+        "Espaciado y particiones de palabra",
+        "Partición/espacio sin cambio real de texto",
+        "La «corrección» solo quita espacios o cierra un guion de corte: mismo texto, "
+        "artefacto de columna justificada (comparado en NFC).",
+    ),
+    (
+        "particion_generica",
+        "Espaciado y particiones de palabra",
+        "Partición de palabra en borde de columna",
+        "Palabra cortada con guion al final de línea, sin señal de error real "
+        "(nombre propio, URL, ambigüedad, categoría protegida).",
+    ),
+    (
+        "letterspacing_titulo",
+        "Espaciado y particiones de palabra",
+        "Letterspacing en títulos («L os», «D ioses»)",
+        "Mayúscula suelta seguida de espacio: artefacto de extracción de títulos con "
+        "espaciado de letras.",
+    ),
+    (
+        "doble_espacio_salto_linea",
+        "Espaciado y particiones de palabra",
+        "Doble espacio por salto de línea",
+        "Una frase larga que salta de línea se lee como espacio doble al extraer el texto.",
+    ),
+    (
+        "falta_espacio_salto_linea",
+        "Espaciado y particiones de palabra",
+        "Falta de espacio por salto de línea",
+        "«Falta espacio entre X e Y» donde X termina una línea e Y empieza la siguiente.",
+    ),
+    (
+        "tabulacion_espaciado",
+        "Espaciado y particiones de palabra",
+        "Tabulación o espaciado de columnas InDesign",
+        "Columnas de InDesign leídas como espacios o tabulaciones espurias.",
+    ),
+    (
+        "espacio_puntuacion_columna",
+        "Espaciado y particiones de palabra",
+        "Espacio ante puntuación (columna justificada)",
+        "«Espacio antes del punto/coma», «espaciado espurio»: salto de línea de columna "
+        "justificada.",
+    ),
+    (
+        "espacio_en_enlace_doi",
+        "Enlaces, DOIs y referencias",
+        "Espacio espurio en URL/DOI",
+        "El enlace se parte por salto de línea al extraer; no hay espacio real en el PDF.",
+    ),
+    (
+        "salto_de_linea_referencia",
+        "Enlaces, DOIs y referencias",
+        "Referencia partida entre líneas",
+        "«Reencadenar», «no rompa la referencia»: artefacto de extracción de referencias "
+        "bibliográficas.",
+    ),
+    (
+        "nota_orden_extraccion",
+        "Notas al pie",
+        "Nota al pie con orden de extracción confuso",
+        "PyMuPDF extrae el llamado/nota en un orden que no respeta la posición visual real "
+        "(calibrado y verificado visualmente contra el PDF con NovumJus V19N3).",
+    ),
+    (
+        "comillas_norma_documento",
+        "Composición tipográfica",
+        "Comillas que contradicen la norma del documento",
+        "El documento usa consistentemente comillas inglesas o latinas; se descartan quejas "
+        "que pidan la otra norma.",
+    ),
+    (
+        "cursiva_ya_presente",
+        "Composición tipográfica",
+        "Cursiva ya presente en la fuente real",
+        "Se verifica el flag/nombre de fuente del span real; si ya es itálica, la queja es falsa.",
+    ),
+    (
+        "versalita_ya_presente",
+        "Composición tipográfica",
+        "Versalita ya presente (romanos en minúscula)",
+        "Los números romanos en versalitas se extraen en minúscula; no significa que falten.",
+    ),
+    (
+        "puntos_guia_indice",
+        "Composición tipográfica",
+        "Puntos guía del índice como «corruptos»",
+        "Los puntos guía (....) del índice se leen como caracteres corruptos al extraer.",
+    ),
+    (
+        "glifo_o_vineta_suelta",
+        "Composición tipográfica",
+        "Viñeta o glifo suelto",
+        "Viñetas o marcadores de tabla/cabecera sueltos: artefacto de extracción, no error "
+        "del impreso.",
+    ),
+    (
+        "footer_slug_indesign",
+        "Composición tipográfica",
+        "Pie de página / slug de InDesign",
+        "Cualquier marca en la banda inferior de exportación de InDesign; no va impreso.",
+    ),
+    (
+        "cornisa_repetida",
+        "Composición tipográfica",
+        "Cornisa/cabecera repetida en cada página",
+        "Se conserva la primera aparición de la cornisa y se descartan las repeticiones.",
+    ),
+    (
+        "verificar_sin_correccion",
+        "Instrucciones sin corrección concreta",
+        "«Verificar/comprobar…» sin corrección concreta",
+        "Dato a revisar por un humano, no un error tipográfico marcable.",
+    ),
+    (
+        "unificar_vago",
+        "Instrucciones sin corrección concreta",
+        "«Unificar…» vago, sin objeto concreto",
+        "Instrucción genérica de unificación sin corrección de texto específica.",
+    ),
+    (
+        "instruccion_disenadora",
+        "Instrucciones sin corrección concreta",
+        "Instrucción a diseñadora/diagramador",
+        "No es una corrección de prueba, es una instrucción de maquetación.",
+    ),
+    (
+        "maquetacion_diagramador",
+        "Instrucciones sin corrección concreta",
+        "Instrucción de recomposición/maquetación",
+        "Recomponer, alinear, reajustar paginación: composición, no corrección del texto.",
+    ),
+    (
+        "autodescarte_modelo",
+        "Instrucciones sin corrección concreta",
+        "El modelo se autodescarta",
+        "El propio modelo dice «no marcar» / «no reportar» / «descartar si no hay error».",
+    ),
+]
+
 
 def texto_anotacion(h: dict) -> str:
     """Texto VISIBLE del globo, con la voz natural del corrector (FAGV).
@@ -1046,6 +1195,140 @@ def generar_informes(
 # ───────────────────────────────────────────────────────────────────────────────
 
 
+class ToggleSwitch(tk.Canvas):
+    """Interruptor tipo iOS dibujado a mano en Canvas — ttk.Checkbutton no
+    tiene superficie de estilo (sin bordes redondeados, sin transición) y se
+    ve como un formulario de los 90 sin importar la paleta de colores.
+
+    Se ata a un tk.BooleanVar: lee su valor al dibujar y lo actualiza al
+    hacer clic. Si otro código cambia la variable, se puede llamar a
+    redibujar() para reflejarlo.
+    """
+
+    def __init__(
+        self,
+        parent,
+        variable: tk.BooleanVar,
+        command=None,
+        ancho: int = 42,
+        alto: int = 22,
+        color_on: str = "#cba6f7",
+        color_off: str = "#45475a",
+        color_thumb: str = "#1e1e2e",
+        bg: str = "#1e1e2e",
+    ):
+        super().__init__(
+            parent, width=ancho, height=alto, bg=bg, highlightthickness=0, cursor="hand2"
+        )
+        self.variable = variable
+        self.command = command
+        self.ancho = ancho
+        self.alto = alto
+        self.color_on = color_on
+        self.color_off = color_off
+        self.color_thumb = color_thumb
+        # Animación simple del thumb (unos pocos pasos) para que el toggle
+        # se sienta interactivo en vez de un cambio brusco de estado.
+        self._pasos_animacion = 6
+        self._animando = False
+
+        self.bind("<Button-1>", self._alternar)
+        self.redibujar()
+
+    def _alternar(self, _event=None):
+        self.variable.set(not self.variable.get())
+        self._animar(0)
+        if self.command:
+            self.command()
+
+    def _animar(self, paso: int):
+        self._animando = paso < self._pasos_animacion
+        self._dibujar_frame(paso / self._pasos_animacion)
+        if self._animando:
+            self.after(12, lambda: self._animar(paso + 1))
+
+    def redibujar(self):
+        if not self._animando:
+            self._dibujar_frame(1.0 if self.variable.get() else 0.0)
+
+    def _dibujar_frame(self, avance_hacia_on: float):
+        """avance_hacia_on: 0.0 = totalmente OFF, 1.0 = totalmente ON. Durante
+        la animación interpola la posición del thumb entre ambos extremos."""
+        self.delete("all")
+        r = self.alto / 2
+        on = self.variable.get()
+        # Interpolar color de fondo y posición del thumb según hacia dónde
+        # se anima (si on=True vamos hacia color_on, si on=False hacia off).
+        t = avance_hacia_on if on else (1 - avance_hacia_on)
+        color_fondo = self._mezclar(self.color_off, self.color_on, t)
+        x_thumb = r + (self.ancho - 2 * r) * t
+
+        self.create_oval(0, 0, 2 * r, 2 * r, fill=color_fondo, outline="")
+        self.create_oval(self.ancho - 2 * r, 0, self.ancho, 2 * r, fill=color_fondo, outline="")
+        self.create_rectangle(r, 0, self.ancho - r, 2 * r, fill=color_fondo, outline="")
+
+        r_thumb = r - 3
+        self.create_oval(
+            x_thumb - r_thumb,
+            r - r_thumb,
+            x_thumb + r_thumb,
+            r + r_thumb,
+            fill=self.color_thumb,
+            outline="",
+        )
+
+    @staticmethod
+    def _mezclar(hex_a: str, hex_b: str, t: float) -> str:
+        """Interpola linealmente entre dos colores #RRGGBB."""
+        t = max(0.0, min(1.0, t))
+        a = tuple(int(hex_a[i : i + 2], 16) for i in (1, 3, 5))
+        b = tuple(int(hex_b[i : i + 2], 16) for i in (1, 3, 5))
+        mezcla = tuple(round(a[i] + (b[i] - a[i]) * t) for i in range(3))
+        return f"#{mezcla[0]:02x}{mezcla[1]:02x}{mezcla[2]:02x}"
+
+
+class FiltroChip(tk.Canvas):
+    """Pastilla clicable tipo "Callejones 107" (como los chips de categoría
+    de Errata): fondo de color cuando está activa, gris cuando no, texto con
+    el conteo en vivo. Se reconstruye en cada refresco de la tabla porque el
+    ancho depende del texto (el conteo cambia de longitud)."""
+
+    ALTO = 26
+    COLOR_INACTIVO = "#313244"
+    FG_INACTIVO = "#a6adc8"
+    FG_ACTIVO = "#1e1e2e"
+
+    def __init__(self, parent, texto: str, color_activo: str, activo: bool, on_click, bg="#1e1e2e"):
+        self.texto = texto
+        self.color_activo = color_activo
+        self.activo = activo
+        self.on_click = on_click
+        self.fuente = tkfont.Font(family="Segoe UI", size=9)
+        ancho = self.fuente.measure(texto) + 26
+        super().__init__(
+            parent, width=ancho, height=self.ALTO, bg=bg, highlightthickness=0, cursor="hand2"
+        )
+        self.ancho = ancho
+        self.bind("<Button-1>", self._clic)
+        self._dibujar()
+
+    def _clic(self, _event=None):
+        self.activo = not self.activo
+        self._dibujar()
+        if self.on_click:
+            self.on_click(self.activo)
+
+    def _dibujar(self):
+        self.delete("all")
+        color = self.color_activo if self.activo else self.COLOR_INACTIVO
+        fg = self.FG_ACTIVO if self.activo else self.FG_INACTIVO
+        r = self.ALTO / 2
+        self.create_oval(0, 0, 2 * r, 2 * r, fill=color, outline="")
+        self.create_oval(self.ancho - 2 * r, 0, self.ancho, 2 * r, fill=color, outline="")
+        self.create_rectangle(r, 0, self.ancho - r, 2 * r, fill=color, outline="")
+        self.create_text(self.ancho / 2, self.ALTO / 2, text=self.texto, fill=fg, font=self.fuente)
+
+
 class AppCorrector(tk.Tk):
     PROVEEDORES = ["Ollama (local — sin tokens)", "OpenAI", "Gemini", "Claude", "Perplexity"]
 
@@ -1077,6 +1360,11 @@ class AppCorrector(tk.Tk):
 
         self.perfil = PerfilEstilo()
         self.hallazgos: list = []
+        # Copia sin el filtro documental (_filtrar_falsos_positivos), guardada
+        # justo antes de aplicarlo. Permite reaplicar el filtro con Ajustes
+        # nuevos sin volver a gastar en el LLM (botón "Reaplicar filtro").
+        self.hallazgos_crudos: list = []
+        self.ruta_pdf_analizada = ""
         self.dir_salida = ""
         self.ruta_pdf_revisado = ""
         self.ruta_xfdf = ""
@@ -1084,9 +1372,61 @@ class AppCorrector(tk.Tk):
         self.ruta_csv = ""
         self.en_proceso = False
 
+        # Un BooleanVar por regla de REGLAS_FILTRO, activo por defecto (mismo
+        # comportamiento que antes de existir la pestaña "Ajustes de filtrado").
+        self.config_filtro: dict[str, tk.BooleanVar] = {
+            regla_id: tk.BooleanVar(value=True) for regla_id, _, _, _ in REGLAS_FILTRO
+        }
+
+        # Estado de los chips de filtro de la pestaña "Hallazgos" — qué
+        # gravedades/categorías están activas (todas, por defecto). El "mapa
+        # de hallazgos" recuerda el orden de la última tabla mostrada para
+        # poder saltar del clic en el mapa a la fila correspondiente.
+        self.chips_gravedad_activos: set = {"critica", "importante", "menor"}
+        self.chips_categoria_activos: set = set(ASUNTOS.keys())
+        self._orden_mapa: list = []
+
         self._cargar_keys_env()
+        self._cargar_config_filtro()
         self._construir_ui()
         self._cargar_perfil_gulla_automatico()
+
+    # ── PERSISTENCIA DE AJUSTES DE FILTRADO ─────────────────────────────────
+
+    @staticmethod
+    def _ruta_config_filtro() -> Path:
+        try:
+            base = Path(__file__).parent
+        except NameError:
+            base = Path.cwd()
+        return base / "config_filtro.json"
+
+    def _cargar_config_filtro(self):
+        ruta = self._ruta_config_filtro()
+        if not ruta.exists():
+            return
+        try:
+            guardado = json.loads(ruta.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        for regla_id, activa in guardado.items():
+            if regla_id in self.config_filtro:
+                self.config_filtro[regla_id].set(bool(activa))
+
+    def _guardar_config_filtro(self):
+        datos = {regla_id: var.get() for regla_id, var in self.config_filtro.items()}
+        ruta = self._ruta_config_filtro()
+        try:
+            ruta.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8")
+            messagebox.showinfo(
+                "Ajustes guardados", f"Configuración de filtrado guardada en:\n{ruta}"
+            )
+        except OSError as e:
+            messagebox.showerror("Error al guardar", f"No se pudo escribir {ruta}:\n{e}")
+
+    def _restablecer_config_filtro(self):
+        for var in self.config_filtro.values():
+            var.set(True)
 
     def _cargar_perfil_gulla_automatico(self):
         """Carga el perfil de FAGV automáticamente si existe."""
@@ -1209,6 +1549,7 @@ class AppCorrector(tk.Tk):
         tab_config = ttk.Frame(nb)
         tab_estilo = ttk.Frame(nb)
         tab_hallazgos = ttk.Frame(nb)
+        tab_filtro = ttk.Frame(nb)
         tab_entregables = ttk.Frame(nb)
         tab_log = ttk.Frame(nb)
 
@@ -1216,6 +1557,7 @@ class AppCorrector(tk.Tk):
         nb.add(tab_config, text="  Configuración  ")
         nb.add(tab_estilo, text="  ◆ Perfil de estilo  ")
         nb.add(tab_hallazgos, text="  Hallazgos  ")
+        nb.add(tab_filtro, text="  ⚙ Ajustes de filtrado  ")
         nb.add(tab_entregables, text="  Entregables  ")
         nb.add(tab_log, text="  Log  ")
 
@@ -1223,6 +1565,7 @@ class AppCorrector(tk.Tk):
         self._tab_config(tab_config)
         self._tab_estilo(tab_estilo)
         self._tab_hallazgos(tab_hallazgos)
+        self._tab_filtro(tab_filtro)
         self._tab_entregables(tab_entregables)
         self._tab_log(tab_log)
 
@@ -1413,31 +1756,45 @@ class AppCorrector(tk.Tk):
 
     # ── TAB HALLAZGOS ─────────────────────────────────────────────────────────
 
+    COLORES_GRAVEDAD = {"critica": "#f38ba8", "importante": "#fab387", "menor": "#a6e3a1"}
+    COLORES_CATEGORIA = {
+        "ortotipografia": "#f38ba8",
+        "composicion_tipografica": "#fab387",
+        "jerarquia_visual": "#f9e2af",
+        "paginacion": "#a6e3a1",
+        "arquitectura_pagina": "#94e2d5",
+        "imagenes_tablas": "#89b4fa",
+        "riesgo_tecnico": "#cba6f7",
+        "preliminares_finales": "#f5c2e7",
+    }
+
     def _tab_hallazgos(self, parent):
         filtros = ttk.Frame(parent)
-        filtros.pack(fill="x", padx=12, pady=8)
+        filtros.pack(fill="x", padx=12, pady=(8, 4))
+        self.frame_chips_gravedad = ttk.Frame(filtros)
+        self.frame_chips_gravedad.pack(side="left")
 
-        ttk.Label(filtros, text="Gravedad:").pack(side="left")
-        self.filtro_gravedad = ttk.Combobox(
-            filtros, values=["Todos", "critica", "importante", "menor"], state="readonly", width=14
-        )
-        self.filtro_gravedad.set("Todos")
-        self.filtro_gravedad.pack(side="left", padx=8)
-        self.filtro_gravedad.bind("<<ComboboxSelected>>", lambda e: self._aplicar_filtro())
-
-        ttk.Label(filtros, text="Categoría:").pack(side="left", padx=(16, 0))
-        self.filtro_cat = ttk.Combobox(
-            filtros, values=["Todos"] + list(ASUNTOS.keys()), state="readonly", width=22
-        )
-        self.filtro_cat.set("Todos")
-        self.filtro_cat.pack(side="left", padx=8)
-        self.filtro_cat.bind("<<ComboboxSelected>>", lambda e: self._aplicar_filtro())
-
-        self.lbl_conteo = ttk.Label(filtros, text="")
+        filtros2 = ttk.Frame(parent)
+        filtros2.pack(fill="x", padx=12, pady=(0, 8))
+        self.frame_chips_categoria = ttk.Frame(filtros2)
+        self.frame_chips_categoria.pack(side="left")
+        self.lbl_conteo = ttk.Label(filtros2, text="")
         self.lbl_conteo.pack(side="right", padx=12)
 
+        cuerpo = ttk.Frame(parent)
+        cuerpo.pack(fill="both", expand=True, padx=12)
+
+        # "Mapa de hallazgos": tira vertical con un punto de color por
+        # hallazgo, en el orden en que aparecen en la tabla. Da una vista de
+        # densidad de todo el documento de un vistazo y permite saltar con
+        # un clic, sin necesitar un visor de PDF embebido.
+        self.mapa_hallazgos = tk.Canvas(cuerpo, width=14, bg="#181825", highlightthickness=0)
+        self.mapa_hallazgos.pack(side="left", fill="y", padx=(0, 4))
+        self.mapa_hallazgos.bind("<Button-1>", self._clic_mapa_hallazgos)
+        self.mapa_hallazgos.bind("<Configure>", lambda e: self._redibujar_mapa_hallazgos())
+
         cols = ("pagina", "gravedad", "categoria", "tipo", "descripcion", "fragmento", "correccion")
-        self.tree = ttk.Treeview(parent, columns=cols, show="headings", selectmode="extended")
+        self.tree = ttk.Treeview(cuerpo, columns=cols, show="headings", selectmode="extended")
         anchos = {
             "pagina": 55,
             "gravedad": 85,
@@ -1464,12 +1821,162 @@ class AppCorrector(tk.Tk):
         self.tree.tag_configure("importante", background="#2a1500", foreground="#fab387")
         self.tree.tag_configure("menor", background="#001a00", foreground="#a6e3a1")
 
-        scroll_y = ttk.Scrollbar(parent, orient="vertical", command=self.tree.yview)
+        scroll_y = ttk.Scrollbar(cuerpo, orient="vertical", command=self.tree.yview)
         scroll_x = ttk.Scrollbar(parent, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=scroll_y.set, xscrollcommand=scroll_x.set)
-        self.tree.pack(fill="both", expand=True, padx=12)
+        self.tree.pack(side="left", fill="both", expand=True)
         scroll_y.pack(side="right", fill="y")
-        scroll_x.pack(side="bottom", fill="x")
+        scroll_x.pack(fill="x", padx=12)
+
+        self._actualizar_chips_filtro()
+
+    # ── TAB AJUSTES DE FILTRADO ──────────────────────────────────────────────
+
+    @staticmethod
+    def _frame_desplazable(parent) -> ttk.Frame:
+        """Canvas + Scrollbar envolviendo un Frame interior que crece con su
+        contenido. Tkinter no trae un contenedor desplazable listo."""
+        canvas = tk.Canvas(parent, bg="#1e1e2e", highlightthickness=0)
+        scroll = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        interior = ttk.Frame(canvas)
+
+        interior.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        ventana = canvas.create_window((0, 0), window=interior, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(ventana, width=e.width))
+        canvas.configure(yscrollcommand=scroll.set)
+
+        def _rueda(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _rueda)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        return interior
+
+    def _tab_filtro(self, parent):
+        top = ttk.Frame(parent)
+        top.pack(fill="x", padx=16, pady=(12, 4))
+        ttk.Label(
+            top,
+            text="Cada regla descarta una familia de falsos positivos ya calibrada. "
+            "Desactívala si un documento nuevo la necesita conservar.",
+            foreground="#6c7086",
+            wraplength=760,
+            justify="left",
+        ).pack(side="left", fill="x", expand=True)
+
+        botones = ttk.Frame(parent)
+        botones.pack(fill="x", padx=16, pady=(0, 8))
+        ttk.Button(
+            botones,
+            text="↻ Reaplicar filtro (sin gastar IA)",
+            command=self._reaplicar_filtro_documental,
+        ).pack(side="left")
+        ttk.Button(
+            botones,
+            text="Restablecer todo (activar todas)",
+            command=self._restablecer_config_filtro,
+        ).pack(side="left", padx=8)
+        ttk.Button(
+            botones,
+            text="Guardar ajustes",
+            style="Accent.TButton",
+            command=self._guardar_config_filtro,
+        ).pack(side="left")
+
+        interior = self._frame_desplazable(parent)
+
+        grupos: dict[str, list[tuple[str, str, str]]] = {}
+        for regla_id, grupo, etiqueta, descripcion in REGLAS_FILTRO:
+            grupos.setdefault(grupo, []).append((regla_id, etiqueta, descripcion))
+
+        # Un color de acento por grupo (paleta Catppuccin ya usada en el resto
+        # de la app) para que cada tarjeta se distinga de un vistazo, como los
+        # puntos de color por categoría en Errata.
+        colores_grupo = {
+            "Espaciado y particiones de palabra": "#fab387",
+            "Enlaces, DOIs y referencias": "#89b4fa",
+            "Notas al pie": "#f38ba8",
+            "Composición tipográfica": "#a6e3a1",
+            "Instrucciones sin corrección concreta": "#f9e2af",
+        }
+
+        for grupo, reglas in grupos.items():
+            color = colores_grupo.get(grupo, "#cba6f7")
+
+            # Tarjeta: Frame con fondo un tono más claro que la página, sin
+            # el borde de línea fina de ttk.LabelFrame.
+            tarjeta = tk.Frame(interior, bg="#252537")
+            tarjeta.pack(fill="x", padx=16, pady=8)
+
+            cab = tk.Frame(tarjeta, bg="#252537")
+            cab.pack(fill="x", padx=14, pady=(12, 6))
+            punto = tk.Canvas(cab, width=10, height=10, bg="#252537", highlightthickness=0)
+            punto.pack(side="left", padx=(0, 8))
+            punto.create_oval(1, 1, 9, 9, fill=color, outline="")
+            tk.Label(cab, text=grupo, bg="#252537", fg=color, font=("Segoe UI", 11, "bold")).pack(
+                side="left"
+            )
+
+            for regla_id, etiqueta, descripcion in reglas:
+                fila = tk.Frame(tarjeta, bg="#252537")
+                fila.pack(fill="x", padx=14, pady=6)
+
+                encabezado = tk.Frame(fila, bg="#252537")
+                encabezado.pack(fill="x")
+                tk.Label(
+                    encabezado,
+                    text=etiqueta,
+                    bg="#252537",
+                    fg="#cdd6f4",
+                    font=("Segoe UI", 10),
+                    anchor="w",
+                ).pack(side="left", fill="x", expand=True)
+                ToggleSwitch(encabezado, variable=self.config_filtro[regla_id], bg="#252537").pack(
+                    side="right"
+                )
+
+                tk.Label(
+                    fila,
+                    text=descripcion,
+                    bg="#252537",
+                    fg="#6c7086",
+                    font=("Segoe UI", 8),
+                    wraplength=680,
+                    justify="left",
+                    anchor="w",
+                ).pack(fill="x", pady=(2, 0))
+
+            tk.Frame(tarjeta, bg="#252537", height=6).pack(fill="x")
+
+    def _reaplicar_filtro_documental(self):
+        """Vuelve a correr _filtrar_falsos_positivos sobre los hallazgos crudos
+        de la última revisión con los Ajustes actuales, sin llamar al LLM."""
+        if not self.hallazgos_crudos:
+            messagebox.showinfo(
+                "Nada que reaplicar",
+                "Corre una revisión primero. Las reglas del grupo 'Espaciado y "
+                "particiones de palabra' se aplican por página durante el análisis, "
+                "así que un cambio ahí necesita una revisión nueva. El resto del "
+                "filtro documental sí se puede reaplicar aquí sin gastar en el LLM.",
+            )
+            return
+
+        antes = len(self.hallazgos_crudos)
+        self.hallazgos = self._filtrar_falsos_positivos(
+            list(self.hallazgos_crudos), self.ruta_pdf_analizada
+        )
+        self._log(
+            f"Filtro reaplicado con los Ajustes actuales: {len(self.hallazgos)}/{antes} "
+            "hallazgos conservados (sin gastar en el LLM).",
+            "ok",
+        )
+        self._refrescar_tabla()
+
+        if self.dir_salida:
+            ruta = self.ruta_pdf_analizada
+            threading.Thread(target=lambda: self._generar_entregables(ruta), daemon=True).start()
 
     # ── TAB ENTREGABLES ───────────────────────────────────────────────────────
 
@@ -1792,6 +2299,10 @@ class AppCorrector(tk.Tk):
                 # Filtro documental de falsos positivos (comillas según norma del
                 # documento, cursiva/versalita ya presentes, footer de InDesign,
                 # dobles espacios por salto de línea, letterspacing de títulos).
+                # Se guarda la copia cruda ANTES de filtrar para poder reaplicar
+                # el filtro con otros Ajustes sin volver a llamar al LLM.
+                self.hallazgos_crudos = list(self.hallazgos)
+                self.ruta_pdf_analizada = ruta
                 antes_fp = len(self.hallazgos)
                 self.hallazgos = self._filtrar_falsos_positivos(self.hallazgos, ruta)
                 if len(self.hallazgos) != antes_fp:
@@ -1905,12 +2416,29 @@ class AppCorrector(tk.Tk):
     # Categorías donde nunca se descarta (la partición es secundaria al problema real)
     _CATEGORIAS_PROTEGIDAS = {"paginacion", "preliminares_finales", "imagenes_tablas"}
 
+    def _regla_activa(self, regla_id: str) -> bool:
+        """¿Está activa la regla de filtrado `regla_id`? Por defecto (sin GUI o
+        sin esa entrada en config_filtro, p. ej. en tests) se considera activa,
+        que es el comportamiento histórico antes de existir la pestaña de
+        Ajustes de filtrado.
+
+        Usa self.__dict__ en vez de getattr/hasattr: AppCorrector hereda de
+        tk.Tk, cuyo __getattr__ reenvía cualquier atributo ausente al
+        intérprete Tcl (self.tk) — en una instancia creada con
+        AppCorrector.__new__(AppCorrector) sin __init__ (como en los tests),
+        eso dispara una RecursionError en vez de devolver el default.
+        """
+        config = self.__dict__.get("config_filtro", {})
+        var = config.get(regla_id)
+        return var.get() if var is not None else True
+
     def _filtrar_particiones(self, hallazgos: list) -> list:
         """Descarta hallazgos de partición de palabras que son artefactos de PyMuPDF.
 
         Conserva si: la descripción menciona un error adicional real, la categoría
         está protegida, el fragmento tiene una URL, o el modelo declaró certeza alta
-        con gravedad importante/crítica.
+        con gravedad importante/crítica. Cada regla puede desactivarse desde la
+        pestaña "Ajustes de filtrado" (ver REGLAS_FILTRO).
         """
         resultado = []
         for h in hallazgos:
@@ -1938,9 +2466,13 @@ class AppCorrector(tk.Tk):
             frag_sin_espacios = re.sub(r"\s+", "", frag_nfc)
             corr_sin_espacios = re.sub(r"\s+", "", corr_nfc)
             frag_sin_guion = re.sub(r"\s+", "", re.sub(r"-\s*", "", frag_nfc))
-            if frag_sin_espacios and corr_sin_espacios:
-                if frag_sin_espacios == corr_sin_espacios or frag_sin_guion == corr_sin_espacios:
-                    continue
+            if (
+                self._regla_activa("particion_estructural")
+                and frag_sin_espacios
+                and corr_sin_espacios
+                and (frag_sin_espacios == corr_sin_espacios or frag_sin_guion == corr_sin_espacios)
+            ):
+                continue
 
             # ¿Es un hallazgo de partición de palabras?
             texto_hall = desc + " " + corr
@@ -1961,7 +2493,7 @@ class AppCorrector(tk.Tk):
                 )
             )
 
-            if not es_particion:
+            if not es_particion or not self._regla_activa("particion_generica"):
                 resultado.append(h)
                 continue
 
@@ -2211,19 +2743,25 @@ class AppCorrector(tk.Tk):
             idx = h.get("pagina", 1) - 1
 
             # 1. Letterspacing de títulos (mayúscula suelta + espacio en el fragmento)
-            if self._RE_LETTERSPACING.search(frag):
+            if self._regla_activa("letterspacing_titulo") and self._RE_LETTERSPACING.search(frag):
                 descartar("letterspacing_titulo")
                 continue
 
             # 2. Dobles espacios → casi siempre salto de línea de frase larga
-            if self._RE_DOBLE_ESPACIO.search(desc):
+            if self._regla_activa("doble_espacio_salto_linea") and self._RE_DOBLE_ESPACIO.search(
+                desc
+            ):
                 descartar("doble_espacio_salto_linea")
                 continue
 
             # 2b. "Falta espacio entre X e Y" donde X termina una línea e Y
             #     empieza la siguiente = palabra/frase que continúa abajo.
             mfe = re.search(r"falta.*espacio.*entre '([^']+)'\s*y\s*'([^']+)'", desc, re.I)
-            if mfe and 0 <= idx < doc.page_count:
+            if (
+                self._regla_activa("falta_espacio_salto_linea")
+                and mfe
+                and 0 <= idx < doc.page_count
+            ):
                 txt = doc[idx].get_text("text")
                 mm = re.search(re.escape(mfe.group(1)) + r"[\s]*" + re.escape(mfe.group(2)), txt)
                 if mm and "\n" in mm.group():
@@ -2231,8 +2769,10 @@ class AppCorrector(tk.Tk):
                     continue
 
             # 3. Puntos guía del índice leídos como caracteres corruptos
-            if self._RE_PUNTOS_GUIA.search(desc) and (
-                "índice" in desc.lower() or "indice" in desc.lower()
+            if (
+                self._regla_activa("puntos_guia_indice")
+                and self._RE_PUNTOS_GUIA.search(desc)
+                and ("índice" in desc.lower() or "indice" in desc.lower())
             ):
                 descartar("puntos_guia_indice")
                 continue
@@ -2241,7 +2781,7 @@ class AppCorrector(tk.Tk):
             #    La redacción del modelo varía ("deben ser latinas", "comillas
             #    incorrectas, deben ser latinas", "inglesas → latinas"...), así
             #    que se busca la intención, no un orden fijo de palabras.
-            if "comilla" in desc.lower():
+            if self._regla_activa("comillas_norma_documento") and "comilla" in desc.lower():
                 d = (desc + " " + correccion_h).lower()
                 # La propuesta suele venir en la corrección como «…»/" "…" ",
                 # no como la palabra "latina" en la descripción (p. ej. desc=
@@ -2265,7 +2805,7 @@ class AppCorrector(tk.Tk):
 
             # 5. Footer/slug de InDesign: cualquier marca en la banda inferior
             #    (fecha/hora de exportación + nombre .indd). No debe llevar marcas.
-            if 0 <= idx < doc.page_count:
+            if self._regla_activa("footer_slug_indesign") and 0 <= idx < doc.page_count:
                 if spans is None:
                     spans = self._spans_de_fragmento(doc, h)
                 H = alto_pag[idx]
@@ -2274,7 +2814,7 @@ class AppCorrector(tk.Tk):
                     continue
 
             # 6. Cursiva ya presente: el span del fragmento ya es itálico
-            if self._RE_CURSIVA.search(desc):
+            if self._regla_activa("cursiva_ya_presente") and self._RE_CURSIVA.search(desc):
                 if spans is None:
                     spans = self._spans_de_fragmento(doc, h)
                 if spans:
@@ -2286,7 +2826,7 @@ class AppCorrector(tk.Tk):
             # 7. Versalitas ya presentes: en libros diagramados, los romanos
             #    en versalitas se extraen en minúsculas (xix, xvi). Si el
             #    fragmento ya trae el romano en minúscula, está bien compuesto.
-            if self._RE_VERSALITA.search(desc):
+            if self._regla_activa("versalita_ya_presente") and self._RE_VERSALITA.search(desc):
                 if re.search(r"\b(siglo|siglos)\s+[ivxlcdm]{1,7}\b", frag) or re.search(
                     r"\b[ivxlcdm]{2,7}\b", frag
                 ):
@@ -2300,7 +2840,9 @@ class AppCorrector(tk.Tk):
 
             # 8. "Eliminar espacio" dentro de una URL/DOI = enlace partido por salto
             #    de línea. No hay espacio espurio en el PDF real.
-            if self._RE_ESPACIO_ENLACE.search(texto):
+            if self._regla_activa("espacio_en_enlace_doi") and self._RE_ESPACIO_ENLACE.search(
+                texto
+            ):
                 descartar("espacio_en_enlace_doi")
                 continue
 
@@ -2311,51 +2853,61 @@ class AppCorrector(tk.Tk):
             #    le pase: si la instrucción "verificar…" está en la corrección
             #    (desc distinta), la concatenación desc+corrección no la detecta.
             if (
-                self._RE_VERIFICAR.search(desc) or self._RE_VERIFICAR.search(correccion_h)
-            ) and "reemp" not in texto.lower():
+                self._regla_activa("verificar_sin_correccion")
+                and (self._RE_VERIFICAR.search(desc) or self._RE_VERIFICAR.search(correccion_h))
+                and "reemp" not in texto.lower()
+            ):
                 descartar("verificar_sin_correccion")
                 continue
 
             # 10. Instrucción de maquetación a la diseñadora/diagramador.
-            if self._RE_DISENADORA.search(texto):
+            if self._regla_activa("instruccion_disenadora") and self._RE_DISENADORA.search(texto):
                 descartar("instruccion_disenadora")
                 continue
 
             # 11. "Unificar … en toda la página/formato" vago, sin corrección concreta.
-            if self._RE_UNIFICAR_VAGO.search(texto) and "reemp" not in texto.lower():
+            if (
+                self._regla_activa("unificar_vago")
+                and self._RE_UNIFICAR_VAGO.search(texto)
+                and "reemp" not in texto.lower()
+            ):
                 descartar("unificar_vago")
                 continue
 
             # 12. Referencia/enlace partido entre líneas ("reencadenar", "no rompa").
-            if self._RE_REENCADENAR.search(texto):
+            if self._regla_activa("salto_de_linea_referencia") and self._RE_REENCADENAR.search(
+                texto
+            ):
                 descartar("salto_de_linea_referencia")
                 continue
 
             # 13. Tabulación/espaciado de columnas de InDesign leído como error.
-            if self._RE_TABULACION.search(texto):
+            if self._regla_activa("tabulacion_espaciado") and self._RE_TABULACION.search(texto):
                 descartar("tabulacion_espaciado")
                 continue
 
             # 13b. Espacio/coma/punto "espurio"/"sobrante" alrededor de un signo
             #      de puntuación: salto de línea de columna justificada.
-            if self._RE_ESPACIO_PUNTUACION.search(desc) and not self._INDICADORES_ERROR_REAL.search(
-                texto
+            if (
+                self._regla_activa("espacio_puntuacion_columna")
+                and self._RE_ESPACIO_PUNTUACION.search(desc)
+                and not self._INDICADORES_ERROR_REAL.search(texto)
             ):
                 descartar("espacio_puntuacion_columna")
                 continue
 
             # 14. El modelo se desautoriza ("no marcar", "descartar si no hay error").
-            if self._RE_AUTODESCARTE.search(texto):
+            if self._regla_activa("autodescarte_modelo") and self._RE_AUTODESCARTE.search(texto):
                 descartar("autodescarte_modelo")
                 continue
 
             # 15. Instrucción de maquetación/recomposición al diagramador.
-            if self._RE_MAQUETACION.search(texto):
+            if self._regla_activa("maquetacion_diagramador") and self._RE_MAQUETACION.search(texto):
                 descartar("maquetacion_diagramador")
                 continue
 
             # 16. Viñeta o glifo suelto de tabla/cabecera = artefacto de extracción.
-            if self._RE_GLIFO_SUELTO.search(texto):
+            if self._regla_activa("glifo_o_vineta_suelta") and self._RE_GLIFO_SUELTO.search(texto):
                 descartar("glifo_o_vineta_suelta")
                 continue
 
@@ -2363,7 +2915,11 @@ class AppCorrector(tk.Tk):
             #     que el corrector sepa que hay que arreglarla) y se descartan las
             #     repeticiones en el resto de páginas. Solo si no trae una corrección
             #     de texto concreta (Reemp: de una palabra ajena a la cabecera).
-            if self._RE_CORNISA.search(f"{frag} {texto}") and "reemp" not in texto.lower():
+            if (
+                self._regla_activa("cornisa_repetida")
+                and self._RE_CORNISA.search(f"{frag} {texto}")
+                and "reemp" not in texto.lower()
+            ):
                 if cornisa_ya_marcada:
                     descartar("cornisa_repetida")
                     continue
@@ -2372,7 +2928,9 @@ class AppCorrector(tk.Tk):
             # 18. Nota al pie/llamada de nota "corrida", "incrustada", "duplicada",
             #     etc.: orden de extracción de PyMuPDF, no defecto de composición
             #     real (ver docstring de _RE_NOTA_EXTRACCION).
-            if self._RE_NOTA_EXTRACCION.search(desc):
+            if self._regla_activa("nota_orden_extraccion") and self._RE_NOTA_EXTRACCION.search(
+                desc
+            ):
                 descartar("nota_orden_extraccion")
                 continue
 
@@ -2396,12 +2954,15 @@ class AppCorrector(tk.Tk):
     def _limpiar_tabla(self):
         for item in self.tree.get_children():
             self.tree.delete(item)
+        self._orden_mapa = []
         self.lbl_conteo.configure(text="")
+        self._redibujar_mapa_hallazgos()
 
     def _refrescar_tabla(self):
-        """Vacía la tabla y la repuebla desde self.hallazgos (tras filtrar)."""
-        self._limpiar_tabla()
-        self._agregar_filas(self.hallazgos)
+        """Recalcula chips (conteos pueden haber cambiado) y repuebla la
+        tabla respetando qué gravedades/categorías están activas."""
+        self._actualizar_chips_filtro()
+        self._aplicar_filtro()
 
     def _agregar_filas(self, hallazgos: list):
         for h in hallazgos:
@@ -2420,21 +2981,107 @@ class AppCorrector(tk.Tk):
                 ),
                 tags=(grav,),
             )
+        self._orden_mapa.extend(hallazgos)
         n = len(self.tree.get_children())
         self.lbl_conteo.configure(text=f"{n} hallazgo(s)")
+        self._redibujar_mapa_hallazgos()
+
+    def _actualizar_chips_filtro(self):
+        """Reconstruye los chips de gravedad/categoría con el conteo actual
+        de self.hallazgos, conservando cuáles estaban activos/inactivos."""
+        for w in self.frame_chips_gravedad.winfo_children():
+            w.destroy()
+        for w in self.frame_chips_categoria.winfo_children():
+            w.destroy()
+
+        conteo_grav: dict = {}
+        conteo_cat: dict = {}
+        for h in self.hallazgos:
+            g = h.get("gravedad", "menor")
+            c = h.get("categoria", "")
+            conteo_grav[g] = conteo_grav.get(g, 0) + 1
+            conteo_cat[c] = conteo_cat.get(c, 0) + 1
+
+        for grav in ("critica", "importante", "menor"):
+            n = conteo_grav.get(grav, 0)
+            texto = f"{grav.capitalize()}  {n}"
+
+            def on_click(activo, grav=grav):
+                if activo:
+                    self.chips_gravedad_activos.add(grav)
+                else:
+                    self.chips_gravedad_activos.discard(grav)
+                self._aplicar_filtro()
+
+            chip = FiltroChip(
+                self.frame_chips_gravedad,
+                texto,
+                self.COLORES_GRAVEDAD[grav],
+                activo=grav in self.chips_gravedad_activos,
+                on_click=on_click,
+            )
+            chip.pack(side="left", padx=3)
+
+        for cat, nombre in ASUNTOS.items():
+            n = conteo_cat.get(cat, 0)
+            texto = f"{nombre}  {n}"
+
+            def on_click(activo, cat=cat):
+                if activo:
+                    self.chips_categoria_activos.add(cat)
+                else:
+                    self.chips_categoria_activos.discard(cat)
+                self._aplicar_filtro()
+
+            chip = FiltroChip(
+                self.frame_chips_categoria,
+                texto,
+                self.COLORES_CATEGORIA.get(cat, "#cba6f7"),
+                activo=cat in self.chips_categoria_activos,
+                on_click=on_click,
+            )
+            chip.pack(side="left", padx=3, pady=2)
 
     def _aplicar_filtro(self):
-        fg = self.filtro_gravedad.get()
-        fc = self.filtro_cat.get()
         self._limpiar_tabla()
         self._agregar_filas(
             [
                 h
                 for h in self.hallazgos
-                if (fg == "Todos" or h.get("gravedad") == fg)
-                and (fc == "Todos" or h.get("categoria") == fc)
+                if h.get("gravedad") in self.chips_gravedad_activos
+                and h.get("categoria") in self.chips_categoria_activos
             ]
         )
+
+    def _redibujar_mapa_hallazgos(self):
+        cv = self.mapa_hallazgos
+        cv.delete("all")
+        total = len(self._orden_mapa)
+        if total == 0:
+            return
+        alto = max(cv.winfo_height(), 1)
+        ancho = max(cv.winfo_width(), 1)
+        alto_tick = max(alto / total, 1.5)
+        for i, h in enumerate(self._orden_mapa):
+            color = self.COLORES_GRAVEDAD.get(h.get("gravedad", "menor"), "#a6adc8")
+            y0 = i * alto_tick
+            cv.create_rectangle(
+                2, y0, ancho - 2, y0 + max(alto_tick - 1, 1), fill=color, outline=""
+            )
+
+    def _clic_mapa_hallazgos(self, event):
+        total = len(self._orden_mapa)
+        if total == 0:
+            return
+        alto = max(self.mapa_hallazgos.winfo_height(), 1)
+        idx = int(event.y / alto * total)
+        idx = max(0, min(idx, total - 1))
+        hijos = self.tree.get_children()
+        if idx < len(hijos):
+            item = hijos[idx]
+            self.tree.selection_set(item)
+            self.tree.see(item)
+            self.tree.focus(item)
 
     def _ordenar_por(self, col: str):
         items = [(self.tree.set(i, col), i) for i in self.tree.get_children()]
