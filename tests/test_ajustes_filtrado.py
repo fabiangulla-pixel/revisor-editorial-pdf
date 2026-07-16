@@ -4,14 +4,12 @@ verdad una regla dentro de _filtrar_falsos_positivos.
 """
 
 import sys
-import tkinter as tk
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from corrector_editorial import REGLAS_FILTRO, AppCorrector, ToggleSwitch  # noqa: E402
+from corrector_editorial import ToggleSwitch  # noqa: E402
+from motor import REGLAS_FILTRO, MotorRevision  # noqa: E402
 
 # ── Integridad del registro REGLAS_FILTRO ───────────────────────────────────
 
@@ -28,14 +26,9 @@ def test_reglas_filtro_campos_no_vacios():
 
 def test_reglas_filtro_ids_usados_en_el_codigo_fuente():
     """Cada id de REGLAS_FILTRO debe aparecer como descartar("id") o
-    _regla_activa("id") en el propio módulo — si no, el registro quedó
-    desincronizado de la lógica real de filtrado."""
-    fuente = (
-        Path(__file__)
-        .resolve()
-        .parent.parent.joinpath("corrector_editorial.py")
-        .read_text(encoding="utf-8")
-    )
+    _regla_activa("id") en motor.py (donde vive MotorRevision) — si no, el
+    registro quedó desincronizado de la lógica real de filtrado."""
+    fuente = Path(__file__).resolve().parent.parent.joinpath("motor.py").read_text(encoding="utf-8")
     for regla_id, _, _, _ in REGLAS_FILTRO:
         assert f'"{regla_id}"' in fuente, (
             f"'{regla_id}' está en REGLAS_FILTRO pero no se usa en el código de filtrado"
@@ -62,17 +55,11 @@ def test_mezclar_clampa_fuera_de_rango():
 
 
 # ── _regla_activa apaga de verdad una regla en _filtrar_falsos_positivos ───
+# MotorRevision no depende de Tkinter, así que estos tests no necesitan un
+# tk.Tk() oculto: config_filtro es un dict plano {id: bool}.
 
 
-@pytest.fixture
-def root_oculto():
-    root = tk.Tk()
-    root.withdraw()
-    yield root
-    root.destroy()
-
-
-def test_regla_desactivada_conserva_el_hallazgo(root_oculto, tmp_path):
+def _pdf_de_una_pagina(tmp_path):
     import fitz
 
     ruta_pdf = tmp_path / "vacio.pdf"
@@ -80,10 +67,12 @@ def test_regla_desactivada_conserva_el_hallazgo(root_oculto, tmp_path):
     doc.new_page()
     doc.save(str(ruta_pdf))
     doc.close()
+    return ruta_pdf
 
-    app = AppCorrector.__new__(AppCorrector)
-    app.config_filtro = {"nota_orden_extraccion": tk.BooleanVar(root_oculto, value=False)}
-    app._log = lambda *a, **k: None
+
+def test_regla_desactivada_conserva_el_hallazgo(tmp_path):
+    ruta_pdf = _pdf_de_una_pagina(tmp_path)
+    motor = MotorRevision(config_filtro={"nota_orden_extraccion": False})
 
     hallazgos = [
         {
@@ -96,23 +85,15 @@ def test_regla_desactivada_conserva_el_hallazgo(root_oculto, tmp_path):
             "certeza": "alta",
         }
     ]
-    resultado = AppCorrector._filtrar_falsos_positivos(app, hallazgos, str(ruta_pdf))
+    resultado = motor._filtrar_falsos_positivos(hallazgos, str(ruta_pdf))
     assert len(resultado) == 1  # con la regla apagada, ya no se descarta
 
 
-def test_regla_activada_por_defecto_sigue_descartando(root_oculto, tmp_path):
-    import fitz
-
-    ruta_pdf = tmp_path / "vacio.pdf"
-    doc = fitz.open()
-    doc.new_page()
-    doc.save(str(ruta_pdf))
-    doc.close()
-
-    app = AppCorrector.__new__(AppCorrector)
-    app._log = lambda *a, **k: None
+def test_regla_activada_por_defecto_sigue_descartando(tmp_path):
+    ruta_pdf = _pdf_de_una_pagina(tmp_path)
     # Sin config_filtro en absoluto: _regla_activa debe defaultear a True
     # (comportamiento histórico), así que la regla sigue activa.
+    motor = MotorRevision()
 
     hallazgos = [
         {
@@ -125,5 +106,5 @@ def test_regla_activada_por_defecto_sigue_descartando(root_oculto, tmp_path):
             "certeza": "alta",
         }
     ]
-    resultado = AppCorrector._filtrar_falsos_positivos(app, hallazgos, str(ruta_pdf))
+    resultado = motor._filtrar_falsos_positivos(hallazgos, str(ruta_pdf))
     assert resultado == []

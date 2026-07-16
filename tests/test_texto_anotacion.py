@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from corrector_editorial import texto_anotacion  # noqa: E402
+from motor import texto_anotacion  # noqa: E402
 
 
 def _hallazgo(**kw):

@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from corrector_editorial import AppCorrector  # noqa: E402
+from motor import MotorRevision  # noqa: E402
 
 # ── Norma de comillas (lógica pura) ─────────────────────────────────────────
 
@@ -30,23 +30,23 @@ from corrector_editorial import AppCorrector  # noqa: E402
     ],
 )
 def test_norma_desde_conteos(ing, lat, esperado):
-    assert AppCorrector._norma_desde_conteos(ing, lat) == esperado
+    assert MotorRevision._norma_desde_conteos(ing, lat) == esperado
 
 
 # ── Detección de itálica por flags/fuente ───────────────────────────────────
 
 
 def test_es_italica_por_flag():
-    assert AppCorrector._es_italica({"font": "AGaramondPro", "flags": 2}) is True
+    assert MotorRevision._es_italica({"font": "AGaramondPro", "flags": 2}) is True
 
 
 def test_es_italica_por_nombre_fuente():
-    assert AppCorrector._es_italica({"font": "AGaramondPro-Italic", "flags": 0}) is True
-    assert AppCorrector._es_italica({"font": "MinionPro-It", "flags": 0}) is True
+    assert MotorRevision._es_italica({"font": "AGaramondPro-Italic", "flags": 0}) is True
+    assert MotorRevision._es_italica({"font": "MinionPro-It", "flags": 0}) is True
 
 
 def test_no_italica():
-    assert AppCorrector._es_italica({"font": "AGaramondPro-Regular", "flags": 0}) is False
+    assert MotorRevision._es_italica({"font": "AGaramondPro-Regular", "flags": 0}) is False
 
 
 # ── Reglas regex de clasificación ───────────────────────────────────────────
@@ -62,7 +62,7 @@ def test_no_italica():
     ],
 )
 def test_letterspacing_detectado(frag):
-    assert AppCorrector._RE_LETTERSPACING.search(frag) is not None
+    assert MotorRevision._RE_LETTERSPACING.search(frag) is not None
 
 
 @pytest.mark.parametrize(
@@ -74,7 +74,7 @@ def test_letterspacing_detectado(frag):
     ],
 )
 def test_letterspacing_no_falsea_titulos_normales(frag):
-    assert AppCorrector._RE_LETTERSPACING.search(frag) is None
+    assert MotorRevision._RE_LETTERSPACING.search(frag) is None
 
 
 @pytest.mark.parametrize(
@@ -86,7 +86,7 @@ def test_letterspacing_no_falsea_titulos_normales(frag):
     ],
 )
 def test_doble_espacio_detectado(desc):
-    assert AppCorrector._RE_DOBLE_ESPACIO.search(desc) is not None
+    assert MotorRevision._RE_DOBLE_ESPACIO.search(desc) is not None
 
 
 @pytest.mark.parametrize(
@@ -98,7 +98,7 @@ def test_doble_espacio_detectado(desc):
     ],
 )
 def test_versalita_detectada(desc):
-    assert AppCorrector._RE_VERSALITA.search(desc) is not None
+    assert MotorRevision._RE_VERSALITA.search(desc) is not None
 
 
 @pytest.mark.parametrize(
@@ -110,11 +110,11 @@ def test_versalita_detectada(desc):
     ],
 )
 def test_cursiva_detectada(desc):
-    assert AppCorrector._RE_CURSIVA.search(desc) is not None
+    assert MotorRevision._RE_CURSIVA.search(desc) is not None
 
 
 def test_puntos_guia_indice_detectado():
-    assert AppCorrector._RE_PUNTOS_GUIA.search("Caracteres corruptos en el índice") is not None
+    assert MotorRevision._RE_PUNTOS_GUIA.search("Caracteres corruptos en el índice") is not None
 
 
 # ── Falsos positivos de revistas académicas (referencias/DOIs) ──────────────
@@ -132,7 +132,7 @@ def test_puntos_guia_indice_detectado():
     ],
 )
 def test_espacio_en_enlace_detectado(texto):
-    assert AppCorrector._RE_ESPACIO_ENLACE.search(texto) is not None
+    assert MotorRevision._RE_ESPACIO_ENLACE.search(texto) is not None
 
 
 @pytest.mark.parametrize(
@@ -145,7 +145,7 @@ def test_espacio_en_enlace_detectado(texto):
     ],
 )
 def test_verificar_sin_correccion_detectado(texto):
-    assert AppCorrector._RE_VERIFICAR.search(texto) is not None
+    assert MotorRevision._RE_VERIFICAR.search(texto) is not None
 
 
 def test_verificar_no_descarta_si_hay_reemplazo():
@@ -163,7 +163,7 @@ def test_verificar_no_descarta_si_hay_reemplazo():
     ],
 )
 def test_instruccion_disenadora_detectada(texto):
-    assert AppCorrector._RE_DISENADORA.search(texto) is not None
+    assert MotorRevision._RE_DISENADORA.search(texto) is not None
 
 
 @pytest.mark.parametrize(
@@ -175,7 +175,7 @@ def test_instruccion_disenadora_detectada(texto):
     ],
 )
 def test_unificar_vago_detectado(texto):
-    assert AppCorrector._RE_UNIFICAR_VAGO.search(texto) is not None
+    assert MotorRevision._RE_UNIFICAR_VAGO.search(texto) is not None
 
 
 @pytest.mark.parametrize(
@@ -187,7 +187,7 @@ def test_unificar_vago_detectado(texto):
     ],
 )
 def test_reencadenar_detectado(texto):
-    assert AppCorrector._RE_REENCADENAR.search(texto) is not None
+    assert MotorRevision._RE_REENCADENAR.search(texto) is not None
 
 
 @pytest.mark.parametrize(
@@ -198,7 +198,7 @@ def test_reencadenar_detectado(texto):
     ],
 )
 def test_tabulacion_detectada(texto):
-    assert AppCorrector._RE_TABULACION.search(texto) is not None
+    assert MotorRevision._RE_TABULACION.search(texto) is not None
 
 
 # ── Falsos positivos calibrados con NovumJus V19N3 (libro con notas al pie
@@ -216,7 +216,7 @@ def test_tabulacion_detectada(texto):
     ],
 )
 def test_espacio_en_enlace_orden_invertido_detectado(texto):
-    assert AppCorrector._RE_ESPACIO_ENLACE.search(texto) is not None
+    assert MotorRevision._RE_ESPACIO_ENLACE.search(texto) is not None
 
 
 @pytest.mark.parametrize(
@@ -235,11 +235,11 @@ def test_espacio_en_enlace_orden_invertido_detectado(texto):
     ],
 )
 def test_espacio_puntuacion_detectado(desc):
-    assert AppCorrector._RE_ESPACIO_PUNTUACION.search(desc) is not None
+    assert MotorRevision._RE_ESPACIO_PUNTUACION.search(desc) is not None
 
 
 def test_espacio_puntuacion_no_falsea_texto_normal():
-    assert AppCorrector._RE_ESPACIO_PUNTUACION.search("falta preposición") is None
+    assert MotorRevision._RE_ESPACIO_PUNTUACION.search("falta preposición") is None
 
 
 @pytest.mark.parametrize(
@@ -268,13 +268,13 @@ def test_espacio_puntuacion_no_falsea_texto_normal():
     ],
 )
 def test_nota_extraccion_detectada(desc):
-    assert AppCorrector._RE_NOTA_EXTRACCION.search(desc) is not None
+    assert MotorRevision._RE_NOTA_EXTRACCION.search(desc) is not None
 
 
 def test_nota_extraccion_no_falsea_correccion_de_contenido():
     # Referencia real a una nota al pie que SÍ trae una corrección de contenido
     # (falta una coma), no un problema de orden de extracción.
-    assert AppCorrector._RE_NOTA_EXTRACCION.search("falta preposición en la cita") is None
+    assert MotorRevision._RE_NOTA_EXTRACCION.search("falta preposición en la cita") is None
 
 
 # ── Regla estructural: la "corrección" solo difiere en espacios/guion ───────
@@ -298,7 +298,7 @@ def test_solo_difiere_en_espacios_o_guion(frag, corr):
 
 
 def test_filtrar_particiones_descarta_solo_espacios():
-    app = AppCorrector.__new__(AppCorrector)
+    app = MotorRevision()
     hallazgos = [
         {
             "pagina": 1,
@@ -328,14 +328,14 @@ def test_filtrar_particiones_descarta_solo_espacios():
             "certeza": "alta",
         },
     ]
-    resultado = AppCorrector._filtrar_particiones(app, hallazgos)
+    resultado = app._filtrar_particiones(hallazgos)
     assert [h["descripcion"] for h in resultado] == ["grafía errónea"]
 
 
 def test_filtrar_particiones_nfc_tilde_compuesta():
     # "Bogotá" con la á descompuesta (NFD: a + acento combinante) vs compuesta
     # (NFC): visualmente idénticas, deben tratarse como "sin corrección real".
-    app = AppCorrector.__new__(AppCorrector)
+    app = MotorRevision()
     frag_nfd = unicodedata.normalize("NFD", "Bogotá")
     corr_nfc = unicodedata.normalize("NFC", "Bogotá")
     hallazgos = [
@@ -349,7 +349,7 @@ def test_filtrar_particiones_nfc_tilde_compuesta():
             "certeza": "alta",
         }
     ]
-    assert AppCorrector._filtrar_particiones(app, hallazgos) == []
+    assert app._filtrar_particiones(hallazgos) == []
 
 
 @pytest.mark.parametrize(
@@ -362,7 +362,7 @@ def test_filtrar_particiones_nfc_tilde_compuesta():
     ],
 )
 def test_espacio_en_enlace_familia_ampliada_detectado(texto):
-    assert AppCorrector._RE_ESPACIO_ENLACE.search(texto) is not None
+    assert MotorRevision._RE_ESPACIO_ENLACE.search(texto) is not None
 
 
 @pytest.mark.parametrize(
@@ -373,7 +373,7 @@ def test_espacio_en_enlace_familia_ampliada_detectado(texto):
     ],
 )
 def test_autodescarte_no_reportar_detectado(texto):
-    assert AppCorrector._RE_AUTODESCARTE.search(texto) is not None
+    assert MotorRevision._RE_AUTODESCARTE.search(texto) is not None
 
 
 def test_verificar_detectado_cuando_esta_solo_en_la_correccion():
@@ -382,5 +382,5 @@ def test_verificar_detectado_cuando_esta_solo_en_la_correccion():
     # concatenadas y nunca coincidía en este caso.
     desc = "url partida y truncada"
     correccion = "verificar y completar la url"
-    assert AppCorrector._RE_VERIFICAR.search(desc) is None
-    assert AppCorrector._RE_VERIFICAR.search(correccion) is not None
+    assert MotorRevision._RE_VERIFICAR.search(desc) is None
+    assert MotorRevision._RE_VERIFICAR.search(correccion) is not None
