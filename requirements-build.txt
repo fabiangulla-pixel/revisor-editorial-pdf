@@ -1,0 +1,3 @@
+# Dependencias solo para empaquetar los .exe (compilar.bat / compilar_web.bat).
+# No hace falta para desarrollar ni para correr los tests.
+pyinstaller>=6.0
