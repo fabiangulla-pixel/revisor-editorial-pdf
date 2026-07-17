@@ -17,6 +17,10 @@ dist/
 # ── Secretos y configuración local ──────────────────────────────────────────
 .env
 *.key
+config_filtro.json
+
+# ── Servidor web: subidas de usuario ────────────────────────────────────────
+_subidas_web/
 
 # ── Datos de prueba pesados (no versionar) ──────────────────────────────────
 Pruebas/

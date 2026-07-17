@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Revisor Editorial PDF</title>
+<link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="topbar">
+  <div class="marca">
+    <span class="marca-icono">✎</span>
+    <span class="marca-texto">Revisor Editorial <b>PDF</b></span>
+  </div>
+  <div class="perfil-badge" id="perfil-badge">Cargando…</div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab activa" data-tab="revision">Revisión</button>
+  <button class="tab" data-tab="hallazgos">Hallazgos</button>
+  <button class="tab" data-tab="ajustes">⚙ Ajustes de filtrado</button>
+  <button class="tab" data-tab="entregables">Entregables</button>
+  <button class="tab" data-tab="config">Configuración</button>
+</nav>
+
+<main>
+
+  <!-- ── REVISIÓN ─────────────────────────────────────────────────────── -->
+  <section class="vista activa" id="vista-revision">
+    <div class="tarjeta">
+      <h2>Archivo PDF a revisar</h2>
+      <div class="dropzone" id="dropzone">
+        <input type="file" id="input-pdf" accept="application/pdf" hidden />
+        <div class="dropzone-icono">⇩</div>
+        <div id="dropzone-texto">Arrastra o haz clic · PDF</div>
+        <div class="dropzone-sub" id="dropzone-sub"></div>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Motor de análisis</h2>
+      <div class="fila">
+        <label>Proveedor
+          <select id="sel-proveedor">
+            <option value="ollama">Ollama (local — sin tokens)</option>
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Gemini</option>
+            <option value="claude">Claude</option>
+            <option value="perplexity">Perplexity</option>
+          </select>
+        </label>
+        <label>Modelo
+          <select id="sel-modelo"></select>
+        </label>
+      </div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Progreso</h2>
+      <div class="barra-progreso"><div class="barra-progreso-relleno" id="barra-progreso"></div></div>
+      <div class="progreso-texto" id="progreso-texto">Listo para comenzar.</div>
+      <div class="acciones">
+        <button class="btn btn-accent" id="btn-iniciar">▶ Iniciar revisión</button>
+        <button class="btn" id="btn-detener" disabled>■ Detener</button>
+      </div>
+      <div class="dictamen" id="dictamen"></div>
+    </div>
+
+    <div class="tarjeta">
+      <h2>Log</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </section>
+
+  <!-- ── HALLAZGOS ────────────────────────────────────────────────────── -->
+  <section class="vista" id="vista-hallazgos">
+    <div class="chips-barra" id="chips-gravedad"></div>
+    <div class="chips-barra" id="chips-categoria"></div>
+    <div class="hallazgos-layout">
+      <div class="mapa-hallazgos" id="mapa-hallazgos"></div>
+      <div class="tabla-hallazgos-wrap">
+        <table class="tabla-hallazgos">
+          <thead>
+            <tr><th>Pág.</th><th>Gravedad</th><th>Categoría</th><th>Descripción</th><th>Fragmento</th><th>Corrección</th></tr>
+          </thead>
+          <tbody id="tabla-hallazgos-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="conteo-hallazgos" id="conteo-hallazgos"></div>
+  </section>
+
+  <!-- ── AJUSTES DE FILTRADO ──────────────────────────────────────────── -->
+  <section class="vista" id="vista-ajustes">
+    <p class="ayuda">Cada regla descarta una familia de falsos positivos ya calibrada. Desactívala si un documento nuevo la necesita conservar.</p>
+    <div class="acciones">
+      <button class="btn" id="btn-reaplicar">↻ Reaplicar filtro (sin gastar IA)</button>
+      <button class="btn" id="btn-restablecer">Restablecer todo</button>
+    </div>
+    <div id="grupos-filtro"></div>
+  </section>
+
+  <!-- ── ENTREGABLES ──────────────────────────────────────────────────── -->
+  <section class="vista" id="vista-entregables">
+    <div class="tarjeta" id="tarjeta-entregables">
+      <p class="ayuda">Corre una revisión para generar los entregables.</p>
+    </div>
+  </section>
+
+  <!-- ── CONFIGURACIÓN ────────────────────────────────────────────────── -->
+  <section class="vista" id="vista-config">
+    <div class="tarjeta">
+      <h2>Corrector</h2>
+      <label>Nombre en anotaciones
+        <input type="text" id="cfg-autor" />
+      </label>
+    </div>
+    <div class="tarjeta">
+      <h2>APIs opcionales</h2>
+      <div id="cfg-keys"></div>
+    </div>
+    <button class="btn btn-accent" id="btn-guardar-config">Guardar configuración</button>
+  </section>
+
+</main>
+
+<div class="modal-fondo" id="modal-costo-fondo">
+  <div class="modal">
+    <h2>Revisar con IA — costo estimado</h2>
+    <pre id="modal-costo-texto"></pre>
+    <div class="acciones">
+      <button class="btn" id="modal-costo-cancelar">Cancelar</button>
+      <button class="btn btn-accent" id="modal-costo-confirmar">Iniciar revisión</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

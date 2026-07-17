@@ -749,13 +749,17 @@ COLORES_HEX = {
     "menor": "#3AAA35",
 }
 ASUNTOS = {
+    # Debe coincidir con el enum "categoria" del prompt SISTEMA_BASE (más
+    # abajo). Antes tenía 3 valores que el LLM nunca emite (jerarquia_visual,
+    # arquitectura_pagina, riesgo_tecnico) y le faltaba "diagramacion", la
+    # categoría más usada en la práctica — el chip de filtro de la interfaz
+    # web ocultaba esos hallazgos en silencio, sin ningún chip para
+    # reactivarlos (detectado al construir esa vista con datos reales).
     "ortotipografia": "Ortotipografía",
     "composicion_tipografica": "Composición",
-    "jerarquia_visual": "Jerarquía visual",
     "paginacion": "Paginación",
-    "arquitectura_pagina": "Arquitectura de página",
+    "diagramacion": "Diagramación",
     "imagenes_tablas": "Imágenes/Tablas",
-    "riesgo_tecnico": "Riesgo técnico",
     "preliminares_finales": "Preliminares/Finales",
 }
 
