@@ -18,6 +18,7 @@
 <nav class="tabs" id="tabs">
   <button class="tab activa" data-tab="revision">Revisión</button>
   <button class="tab" data-tab="hallazgos">Hallazgos</button>
+  <button class="tab" data-tab="enlaces">🔗 Enlaces</button>
   <button class="tab" data-tab="ajustes">⚙ Ajustes de filtrado</button>
   <button class="tab" data-tab="entregables">Entregables</button>
   <button class="tab" data-tab="config">Configuración</button>
@@ -113,6 +114,27 @@
       </div>
     </div>
     <div class="conteo-hallazgos" id="conteo-hallazgos"></div>
+  </section>
+
+  <!-- ── ENLACES ──────────────────────────────────────────────────────── -->
+  <section class="vista" id="vista-enlaces">
+    <div class="tarjeta">
+      <h2>Enlaces del documento</h2>
+      <p class="ayuda">Extrae las URLs del PDF y comprueba en vivo si responden. No consume tokens de IA.</p>
+      <div class="acciones">
+        <button class="btn btn-accent" id="btn-verificar-enlaces">🔗 Verificar enlaces</button>
+        <span class="enlaces-resumen" id="enlaces-resumen"></span>
+      </div>
+    </div>
+    <div class="tarjeta">
+      <table class="tabla-hallazgos">
+        <thead>
+          <tr><th>Estado</th><th>Código</th><th>Página(s)</th><th>URL</th></tr>
+        </thead>
+        <tbody id="tabla-enlaces-body"></tbody>
+      </table>
+      <p class="ayuda" id="enlaces-vacio">Aún no se han verificado enlaces.</p>
+    </div>
   </section>
 
   <!-- ── AJUSTES DE FILTRADO ──────────────────────────────────────────── -->

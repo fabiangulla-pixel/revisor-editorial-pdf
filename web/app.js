@@ -30,6 +30,7 @@ function irATab(nombre) {
   btn.classList.add("activa");
   document.getElementById("vista-" + nombre).classList.add("activa");
   if (nombre === "hallazgos") cargarHallazgos();
+  if (nombre === "enlaces") cargarEnlaces();
   if (nombre === "ajustes") cargarAjustesFiltro();
   if (nombre === "entregables") actualizarEstado();
 }
@@ -417,6 +418,64 @@ document.getElementById("btn-reaplicar").addEventListener("click", async () => {
 document.getElementById("btn-restablecer").addEventListener("click", async () => {
   await postJSON("/api/reglas_filtro/restablecer", {});
   cargarAjustesFiltro();
+});
+
+// ── enlaces: extracción + verificación HTTP en vivo ──────────────────────
+const ESTADO_ENLACE = {
+  ok: { etiqueta: "✓ OK", clase: "badge-menor" },
+  roto: { etiqueta: "✗ Roto", clase: "badge-critica" },
+  no_responde: { etiqueta: "⚠ Sin respuesta", clase: "badge-importante" },
+  no_verificable: { etiqueta: "◌ No verificable", clase: "badge-importante" },
+};
+
+let pollEnlacesHandle = null;
+
+async function cargarEnlaces() {
+  const r = await getJSON("/api/enlaces");
+  renderEnlaces(r);
+  if (r.verificando && !pollEnlacesHandle) {
+    pollEnlacesHandle = setInterval(async () => {
+      const e = await getJSON("/api/enlaces");
+      renderEnlaces(e);
+      if (!e.verificando) { clearInterval(pollEnlacesHandle); pollEnlacesHandle = null; }
+    }, 900);
+  }
+}
+
+function renderEnlaces(r) {
+  const btn = document.getElementById("btn-verificar-enlaces");
+  btn.disabled = r.verificando;
+  btn.textContent = r.verificando ? "Verificando…" : "🔗 Verificar enlaces";
+
+  const items = r.items || [];
+  document.getElementById("enlaces-vacio").style.display = items.length ? "none" : "block";
+
+  const conteo = {};
+  items.forEach((e) => { conteo[e.estado] = (conteo[e.estado] || 0) + 1; });
+  document.getElementById("enlaces-resumen").textContent = items.length
+    ? `${items.length} enlace(s) — ${conteo.roto || 0} roto(s), ${conteo.no_responde || 0} sin respuesta`
+    : "";
+
+  const body = document.getElementById("tabla-enlaces-body");
+  body.innerHTML = items
+    .map((e) => {
+      const info = ESTADO_ENLACE[e.estado] || { etiqueta: e.estado, clase: "" };
+      return `
+      <tr>
+        <td><span class="badge-gravedad ${info.clase}">${info.etiqueta}</span></td>
+        <td>${e.codigo ?? "—"}</td>
+        <td>${(e.paginas || []).join(", ")}</td>
+        <td><a href="${e.url}" target="_blank" rel="noopener">${escapeHtml(e.url)}</a></td>
+      </tr>`;
+    })
+    .join("");
+}
+
+document.getElementById("btn-verificar-enlaces").addEventListener("click", async () => {
+  const ruta_pdf = (pdfActual && pdfActual.ruta_pdf) || undefined;
+  const r = await postJSON("/api/enlaces/verificar", { ruta_pdf });
+  if (r.error) { alert(r.error); return; }
+  cargarEnlaces();
 });
 
 // ── visor de PDF embebido (PDF.js) ───────────────────────────────────────

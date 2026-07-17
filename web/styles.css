@@ -334,6 +334,7 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .badge-menor { background: rgba(166, 227, 161, 0.18); color: var(--menor); }
 
 .conteo-hallazgos { color: var(--muted); font-size: 0.85rem; }
+.enlaces-resumen { color: var(--muted); font-size: 0.85rem; }
 
 /* ── ajustes de filtrado ─────────────────────────────────────────────── */
 .grupo-filtro { margin-bottom: 18px; }

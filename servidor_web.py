@@ -37,8 +37,10 @@ from motor import (
     anotar_pdf,
     aplicar_zonas_exclusion,
     calcular_bboxes,
+    extraer_urls_pdf,
     generar_informes,
     generar_xfdf,
+    verificar_urls,
 )
 
 # En un .exe de PyInstaller (onefile), __file__ apunta al directorio temporal
@@ -92,6 +94,8 @@ class EstadoServidor:
         # {numero_de_pagina: [[x0,y0,x1,y1], ...]} en puntos PDF, dibujadas por
         # el usuario sobre el visor web. Se reinician con cada PDF nuevo.
         self.zonas_exclusion: dict = {}
+        self.enlaces: list = []
+        self.verificando_enlaces = False
 
         self.motor = MotorRevision(log_callback=self._log)
         self._cargar_config_filtro()
@@ -343,6 +347,44 @@ def reaplicar_filtro_documental() -> dict:
     return {"ok": True, "antes": antes, "despues": len(estado.hallazgos)}
 
 
+def _verificar_enlaces_en_hilo(ruta_pdf: str):
+    """Extrae y verifica URLs en segundo plano — puede tardar varios segundos
+    con muchas referencias, no debe bloquear el servidor."""
+    estado = ESTADO
+    try:
+        urls_paginas = extraer_urls_pdf(ruta_pdf)
+        if not urls_paginas:
+            estado._log("No se encontraron URLs en el documento.")
+            estado.enlaces = []
+            return
+        estado._log(f"Verificando {len(urls_paginas)} enlace(s)…")
+        resultados = verificar_urls(list(urls_paginas.keys()))
+        por_url = {r["url"]: r for r in resultados}
+        estado.enlaces = sorted(
+            (
+                {
+                    "url": url,
+                    "paginas": paginas,
+                    "estado": por_url[url]["estado"],
+                    "codigo": por_url[url]["codigo"],
+                }
+                for url, paginas in urls_paginas.items()
+            ),
+            key=lambda e: e["paginas"][0],
+        )
+        rotos = sum(1 for e in estado.enlaces if e["estado"] == "roto")
+        no_responde = sum(1 for e in estado.enlaces if e["estado"] == "no_responde")
+        estado._log(
+            f"Enlaces verificados: {len(estado.enlaces)} total, {rotos} roto(s), "
+            f"{no_responde} sin respuesta.",
+            "ok" if not rotos else "warn",
+        )
+    except Exception as e:
+        estado._log(f"Error verificando enlaces: {e}", "error")
+    finally:
+        estado.verificando_enlaces = False
+
+
 # ───────────────────────────────────────────────────────────────────────────
 # HTTP
 # ───────────────────────────────────────────────────────────────────────────
@@ -461,6 +503,9 @@ class ManejadorAPI(BaseHTTPRequestHandler):
 
         if ruta == "/api/zonas_exclusion":
             return self._json({"zonas": ESTADO.zonas_exclusion})
+
+        if ruta == "/api/enlaces":
+            return self._json({"verificando": ESTADO.verificando_enlaces, "items": ESTADO.enlaces})
 
         if ruta == "/api/pdf/ver":
             # El PDF original analizado, para que el visor embebido (PDF.js)
@@ -599,6 +644,19 @@ class ManejadorAPI(BaseHTTPRequestHandler):
                 ESTADO.zonas_exclusion = {}
             else:
                 ESTADO.zonas_exclusion.pop(pagina, None)
+            return self._json({"ok": True})
+
+        if ruta == "/api/enlaces/verificar":
+            if ESTADO.verificando_enlaces:
+                return self._json({"error": "ya se están verificando enlaces"}, 409)
+            ruta_pdf = body.get("ruta_pdf") or ESTADO.ruta_pdf_analizada
+            if not ruta_pdf or not Path(ruta_pdf).exists():
+                return self._json({"error": "ruta_pdf inválida"}, 400)
+            ESTADO.verificando_enlaces = True
+            hilo = threading.Thread(
+                target=_verificar_enlaces_en_hilo, args=(ruta_pdf,), daemon=True
+            )
+            hilo.start()
             return self._json({"ok": True})
 
         if ruta == "/api/reglas_filtro":

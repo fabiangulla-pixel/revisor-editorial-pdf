@@ -15,6 +15,7 @@ import re
 import unicodedata
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from xml.dom import minidom
@@ -1152,6 +1153,80 @@ def aplicar_zonas_exclusion(hallazgos: list, zonas: dict) -> list:
                 continue
         resultado.append(h)
     return resultado
+
+
+# ── Verificación de URLs en vivo ─────────────────────────────────────────
+# Errata comprueba si los enlaces de un PDF realmente resuelven (no solo si
+# el texto está bien formado) — la calibración de hoy con NovumJus se
+# concentró en el ruido de extracción alrededor de URLs/DOIs, pero nunca
+# comprobó si el enlace en sí funciona. Esto es un chequeo independiente y
+# complementario al filtro de falsos positivos.
+
+_RE_URL = re.compile(r"https?://[^\s\"'<>\)\]}]+")
+
+_USER_AGENT_NAVEGADOR = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+
+
+def extraer_urls_pdf(ruta_pdf: str) -> dict[str, list[int]]:
+    """Devuelve {url: [páginas donde aparece]} recorriendo el texto de cada
+    página. Limitación conocida: una URL partida por el salto de línea de una
+    columna justificada se ve como dos coincidencias distintas o una
+    incompleta — el mismo artefacto de extracción que motiva buena parte del
+    filtro de falsos positivos, aquí no se intenta reconstruir."""
+    doc = fitz.open(ruta_pdf)
+    hallazgos: dict[str, list[int]] = {}
+    for i in range(doc.page_count):
+        texto = doc[i].get_text("text")
+        for m in _RE_URL.finditer(texto):
+            url = m.group().rstrip(".,;:)")
+            paginas = hallazgos.setdefault(url, [])
+            if (i + 1) not in paginas:
+                paginas.append(i + 1)
+    doc.close()
+    return hallazgos
+
+
+def verificar_url(url: str, timeout: float = 6.0) -> dict:
+    """Comprueba si una URL responde. HEAD primero (más liviano); si el
+    servidor no lo soporta cae a GET. 401/403/429 se marcan como
+    'no_verificable' en vez de 'roto': muchos sitios académicos bloquean
+    peticiones automatizadas (o limitan la tasa) aunque el enlace funcione
+    perfectamente para un humano en el navegador — reportarlos como "roto"
+    sería un falso positivo tan malo como los que se filtraron hoy."""
+    headers = {"User-Agent": _USER_AGENT_NAVEGADOR}
+    try:
+        r = requests.head(url, timeout=timeout, allow_redirects=True, headers=headers)
+        if r.status_code in (405, 501):
+            r = requests.get(
+                url, timeout=timeout, allow_redirects=True, headers=headers, stream=True
+            )
+        codigo = r.status_code
+        if codigo < 400:
+            estado = "ok"
+        elif codigo in (401, 403, 429):
+            estado = "no_verificable"
+        elif codigo >= 500:
+            estado = "no_responde"
+        else:
+            estado = "roto"
+        return {"url": url, "estado": estado, "codigo": codigo}
+    except requests.exceptions.Timeout:
+        return {"url": url, "estado": "no_responde", "codigo": None}
+    except requests.exceptions.RequestException as e:
+        return {"url": url, "estado": "no_responde", "codigo": None, "detalle": str(e)[:200]}
+
+
+def verificar_urls(urls: list[str], max_hilos: int = 8, timeout: float = 6.0) -> list[dict]:
+    """Verifica una lista de URLs en paralelo (I/O-bound: red, no CPU)."""
+    resultados = []
+    with ThreadPoolExecutor(max_workers=max_hilos) as ex:
+        futuros = [ex.submit(verificar_url, u, timeout) for u in urls]
+        for fut in as_completed(futuros):
+            resultados.append(fut.result())
+    return resultados
 
 
 def generar_informes(
