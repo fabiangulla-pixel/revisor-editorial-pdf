@@ -39,8 +39,19 @@ from motor import (
     generar_xfdf,
 )
 
-BASE_DIR = Path(__file__).resolve().parent
-WEB_DIR = BASE_DIR / "web"
+# En un .exe de PyInstaller (onefile), __file__ apunta al directorio temporal
+# de extracción (_MEIPASS), que se borra al cerrar el programa: ahí van los
+# recursos empaquetados de solo lectura (web/), pero NUNCA datos que deban
+# sobrevivir a un reinicio (config_filtro.json, .env, subidas). Esos van
+# junto al .exe real (sys.executable).
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+    ASSETS_DIR = Path(getattr(sys, "_MEIPASS", BASE_DIR))
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+    ASSETS_DIR = BASE_DIR
+
+WEB_DIR = ASSETS_DIR / "web"
 SUBIDAS_DIR = BASE_DIR / "_subidas_web"
 SUBIDAS_DIR.mkdir(exist_ok=True)
 
