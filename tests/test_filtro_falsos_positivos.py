@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from motor import MotorRevision, calcular_bboxes  # noqa: E402
+from motor import MotorRevision, aplicar_zonas_exclusion, calcular_bboxes  # noqa: E402
 
 # ── Norma de comillas (lógica pura) ─────────────────────────────────────────
 
@@ -427,3 +427,49 @@ def test_calcular_bboxes_pdf_invalido_no_lanza():
     hallazgos = [{"pagina": 1, "fragmento": "algo"}]
     resultado = calcular_bboxes(hallazgos, "/ruta/que/no/existe.pdf")
     assert resultado[0]["bbox"] is None
+
+
+# ── aplicar_zonas_exclusion: descartar hallazgos dentro de una zona dibujada ─
+
+
+def _hallazgo(pagina, bbox):
+    return {"pagina": pagina, "descripcion": "x", "bbox": bbox}
+
+
+def test_zona_excluye_hallazgo_dentro():
+    hallazgos = [_hallazgo(1, [100, 100, 120, 110])]
+    zonas = {1: [[50, 50, 200, 200]]}
+    assert aplicar_zonas_exclusion(hallazgos, zonas) == []
+
+
+def test_zona_conserva_hallazgo_fuera():
+    hallazgos = [_hallazgo(1, [300, 300, 320, 310])]
+    zonas = {1: [[50, 50, 200, 200]]}
+    resultado = aplicar_zonas_exclusion(hallazgos, zonas)
+    assert len(resultado) == 1
+
+
+def test_zona_no_afecta_otra_pagina():
+    hallazgos = [_hallazgo(2, [100, 100, 120, 110])]
+    zonas = {1: [[50, 50, 200, 200]]}
+    resultado = aplicar_zonas_exclusion(hallazgos, zonas)
+    assert len(resultado) == 1
+
+
+def test_zona_claves_string_por_json_roundtrip():
+    # Tras un POST JSON, las claves del dict de zonas llegan como str.
+    hallazgos = [_hallazgo(1, [100, 100, 120, 110])]
+    zonas = {"1": [[50, 50, 200, 200]]}
+    assert aplicar_zonas_exclusion(hallazgos, zonas) == []
+
+
+def test_zona_sin_zonas_no_toca_nada():
+    hallazgos = [_hallazgo(1, [100, 100, 120, 110])]
+    assert aplicar_zonas_exclusion(hallazgos, {}) == hallazgos
+
+
+def test_zona_hallazgo_sin_bbox_nunca_se_descarta():
+    hallazgos = [{"pagina": 1, "descripcion": "x", "bbox": None}]
+    zonas = {1: [[0, 0, 1000, 1000]]}  # cubre toda la página
+    resultado = aplicar_zonas_exclusion(hallazgos, zonas)
+    assert len(resultado) == 1

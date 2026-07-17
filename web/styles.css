@@ -252,7 +252,6 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   overflow: auto;
   max-height: 65vh;
   display: flex;
-  justify-content: center;
   background: #0d0d16;
   padding: 12px;
 }
@@ -267,8 +266,28 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   text-align: center;
   padding: 40px;
 }
+/* Envoltorio que se ajusta EXACTAMENTE al tamaño del canvas (no un % del
+   contenedor con scroll): el overlay se ancla a este div con inset:0, así
+   que sus coordenadas de puntero siempre coinciden con el canvas real, sin
+   importar el zoom ni si la página es más ancha que el panel visible.
+   (El centrado con left:50%/translateX(-50%) directamente en el overlay se
+   rompía en cuanto el canvas era más ancho que .visor-canvas-wrap: el 50%
+   se calculaba contra el contenedor, no contra el canvas, y el overlay
+   terminaba fuera del área con scroll — sin recibir clics, como confirmó
+   elementFromPoint() devolviendo BODY en vez del overlay.) */
+.visor-canvas-inner {
+  position: relative;
+  flex-shrink: 0;
+  align-self: flex-start;
+  /* margin:auto en el ítem, no justify-content:center en el contenedor:
+     centra igual cuando el canvas cabe, y cuando es más ancho que el panel
+     (zoom alto) colapsa a 0 en vez de dejar contenido "fantasma" fuera del
+     área con scroll — ver la nota de arriba sobre elementFromPoint. */
+  margin: 0 auto;
+  line-height: 0;
+}
 #visor-canvas { display: block; box-shadow: 0 2px 12px rgba(0,0,0,0.5); }
-#visor-overlay { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); cursor: crosshair; }
+#visor-overlay { position: absolute; inset: 0; cursor: crosshair; }
 
 /* ── hallazgos: mapa de densidad + tabla ────────────────────────────── */
 .hallazgos-layout { flex: 1; min-width: 0; display: flex; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }

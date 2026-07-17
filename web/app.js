@@ -252,6 +252,7 @@ function renderEntregables(estado) {
 
 // ── hallazgos: chips + mapa de densidad + tabla ──────────────────────────
 async function cargarHallazgos() {
+  await cargarZonas();
   const cats = await getJSON("/api/categorias");
   categoriasTodas = { ...cats.categorias };
   const r = await getJSON("/api/hallazgos");
@@ -424,6 +425,9 @@ let cargandoPdf = null;
 let paginaVisorActual = 1;
 let escalaVisor = 1.3;
 let hallazgoVisorActivo = null;
+let zonasPorPagina = {};
+let modoZona = false;
+let arrastreInicio = null;
 
 const visorCanvas = document.getElementById("visor-canvas");
 const visorOverlay = document.getElementById("visor-overlay");
@@ -502,9 +506,88 @@ function redibujarOverlay() {
   dibujarZonasExclusion(ctx);
 }
 
-function dibujarZonasExclusion(_ctx) {
-  // Implementado en el siguiente paso (zonas de exclusión dibujables).
+function dibujarZonasExclusion(ctx) {
+  const zonas = zonasPorPagina[paginaVisorActual] || [];
+  zonas.forEach(([x0, y0, x1, y1]) => {
+    const px = x0 * escalaVisor;
+    const py = y0 * escalaVisor;
+    const pw = (x1 - x0) * escalaVisor;
+    const ph = (y1 - y0) * escalaVisor;
+    ctx.fillStyle = "rgba(108, 112, 134, 0.35)";
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = "#9399b2";
+    ctx.setLineDash([5, 4]);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, pw, ph);
+    ctx.setLineDash([]);
+  });
 }
+
+async function cargarZonas() {
+  const r = await getJSON("/api/zonas_exclusion");
+  zonasPorPagina = {};
+  Object.entries(r.zonas || {}).forEach(([pag, zs]) => {
+    zonasPorPagina[Number(pag)] = zs;
+  });
+}
+
+async function aplicarZonaYRefrescar() {
+  const r = await postJSON("/api/reaplicar_filtro", {});
+  if (r.ok) await cargarHallazgos();
+}
+
+document.getElementById("visor-modo-zona").addEventListener("click", () => {
+  modoZona = !modoZona;
+  document.getElementById("visor-modo-zona").classList.toggle("activo", modoZona);
+});
+
+visorOverlay.addEventListener("mousedown", (e) => {
+  if (!modoZona || !pdfDoc) return;
+  arrastreInicio = { x: e.offsetX, y: e.offsetY };
+});
+
+visorOverlay.addEventListener("mousemove", (e) => {
+  if (!modoZona || !arrastreInicio) return;
+  redibujarOverlay();
+  const ctx = visorOverlay.getContext("2d");
+  const x0 = Math.min(arrastreInicio.x, e.offsetX);
+  const y0 = Math.min(arrastreInicio.y, e.offsetY);
+  const w = Math.abs(e.offsetX - arrastreInicio.x);
+  const h = Math.abs(e.offsetY - arrastreInicio.y);
+  ctx.fillStyle = "rgba(203, 166, 247, 0.25)";
+  ctx.fillRect(x0, y0, w, h);
+  ctx.strokeStyle = "#cba6f7";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x0, y0, w, h);
+});
+
+visorOverlay.addEventListener("mouseup", async (e) => {
+  if (!modoZona || !arrastreInicio) return;
+  const x0px = Math.min(arrastreInicio.x, e.offsetX);
+  const y0px = Math.min(arrastreInicio.y, e.offsetY);
+  const x1px = Math.max(arrastreInicio.x, e.offsetX);
+  const y1px = Math.max(arrastreInicio.y, e.offsetY);
+  arrastreInicio = null;
+  if (x1px - x0px < 6 || y1px - y0px < 6) {
+    redibujarOverlay(); // arrastre insignificante (clic accidental): descartar
+    return;
+  }
+  const zona = [x0px / escalaVisor, y0px / escalaVisor, x1px / escalaVisor, y1px / escalaVisor];
+  const r = await postJSON("/api/zonas_exclusion/agregar", {
+    pagina: paginaVisorActual,
+    zona,
+  });
+  zonasPorPagina[paginaVisorActual] = r.zonas_pagina;
+  redibujarOverlay();
+  await aplicarZonaYRefrescar();
+});
+
+document.getElementById("visor-limpiar-zonas").addEventListener("click", async () => {
+  await postJSON("/api/zonas_exclusion/limpiar", { pagina: paginaVisorActual });
+  zonasPorPagina[paginaVisorActual] = [];
+  redibujarOverlay();
+  await aplicarZonaYRefrescar();
+});
 
 document.getElementById("visor-anterior").addEventListener("click", async () => {
   if (!pdfDoc || paginaVisorActual <= 1) return;

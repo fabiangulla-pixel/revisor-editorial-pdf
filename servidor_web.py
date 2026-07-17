@@ -35,6 +35,7 @@ from motor import (
     PerfilEstilo,
     PerplexityProveedor,
     anotar_pdf,
+    aplicar_zonas_exclusion,
     calcular_bboxes,
     generar_informes,
     generar_xfdf,
@@ -88,6 +89,9 @@ class EstadoServidor:
         self.nombre_pdf = ""
         self.entregables: dict = {}
         self.costo_real: dict | None = None
+        # {numero_de_pagina: [[x0,y0,x1,y1], ...]} en puntos PDF, dibujadas por
+        # el usuario sobre el visor web. Se reinician con cada PDF nuevo.
+        self.zonas_exclusion: dict = {}
 
         self.motor = MotorRevision(log_callback=self._log)
         self._cargar_config_filtro()
@@ -176,6 +180,7 @@ def _sincronizar_motor():
 
 def ejecutar_revision(ruta_pdf: str, proveedor_id: str):
     estado = ESTADO
+    estado.zonas_exclusion = {}  # PDF nuevo: las zonas de la revisión anterior no aplican
     try:
         proveedor = estado.construir_proveedor(proveedor_id)
         ok, msg = proveedor.verificar_conexion()
@@ -253,6 +258,7 @@ def ejecutar_revision(ruta_pdf: str, proveedor_id: str):
                     f"({antes_fp - len(estado.hallazgos)} descartados)"
                 )
             estado.hallazgos = calcular_bboxes(estado.hallazgos, ruta_pdf)
+            estado.hallazgos = aplicar_zonas_exclusion(estado.hallazgos, estado.zonas_exclusion)
             _generar_entregables(ruta_pdf)
 
         estado.progreso = {
@@ -326,6 +332,7 @@ def reaplicar_filtro_documental() -> dict:
         list(estado.hallazgos_crudos), estado.ruta_pdf_analizada
     )
     estado.hallazgos = calcular_bboxes(estado.hallazgos, estado.ruta_pdf_analizada)
+    estado.hallazgos = aplicar_zonas_exclusion(estado.hallazgos, estado.zonas_exclusion)
     estado._log(
         f"Filtro reaplicado con los Ajustes actuales: {len(estado.hallazgos)}/{antes} "
         "hallazgos conservados (sin gastar en el LLM).",
@@ -452,6 +459,9 @@ class ManejadorAPI(BaseHTTPRequestHandler):
         if ruta == "/api/categorias":
             return self._json({"categorias": ASUNTOS})
 
+        if ruta == "/api/zonas_exclusion":
+            return self._json({"zonas": ESTADO.zonas_exclusion})
+
         if ruta == "/api/pdf/ver":
             # El PDF original analizado, para que el visor embebido (PDF.js)
             # lo renderice en el navegador — nunca sale de 127.0.0.1.
@@ -489,6 +499,14 @@ class ManejadorAPI(BaseHTTPRequestHandler):
     def do_POST(self):
         ruta = urlparse(self.path).path
 
+        # /api/subir_pdf lee el cuerpo crudo (binario, no JSON) él mismo, con
+        # su propio manejo de Content-Length. Todas las demás rutas POST
+        # comparten un único punto de lectura del body: si un handler no lo
+        # necesita y no lo consume, en una conexión HTTP/1.1 keep-alive esos
+        # bytes sin leer quedan flotando en el socket y desincronizan la
+        # SIGUIENTE petición en la misma conexión (se cuelga sin error
+        # visible — así se manifestó este bug con /api/detener y
+        # /api/reaplicar_filtro, que no llamaban a _leer_json()).
         if ruta == "/api/subir_pdf":
             largo = int(self.headers.get("Content-Length", 0))
             nombre = self.headers.get("X-Filename", "documento.pdf")
@@ -506,8 +524,9 @@ class ManejadorAPI(BaseHTTPRequestHandler):
                 {"ruta_pdf": str(destino), "nombre": nombre, "num_paginas": num_paginas}
             )
 
+        body = self._leer_json()
+
         if ruta == "/api/estimar_costo":
-            body = self._leer_json()
             ruta_pdf = body.get("ruta_pdf", "")
             proveedor_id = (body.get("proveedor") or "ollama").lower()
             if not ruta_pdf or not Path(ruta_pdf).exists():
@@ -541,7 +560,6 @@ class ManejadorAPI(BaseHTTPRequestHandler):
         if ruta == "/api/iniciar_revision":
             if ESTADO.en_proceso:
                 return self._json({"error": "ya hay una revisión en curso"}, 409)
-            body = self._leer_json()
             ruta_pdf = body.get("ruta_pdf", "")
             proveedor_id = (body.get("proveedor") or "ollama").lower()
             if not ruta_pdf or not Path(ruta_pdf).exists():
@@ -565,8 +583,25 @@ class ManejadorAPI(BaseHTTPRequestHandler):
         if ruta == "/api/reaplicar_filtro":
             return self._json(reaplicar_filtro_documental())
 
+        if ruta == "/api/zonas_exclusion/agregar":
+            pagina = body.get("pagina")
+            zona = body.get("zona")  # [x0, y0, x1, y1]
+            if not isinstance(pagina, int) or not (isinstance(zona, list) and len(zona) == 4):
+                return self._json(
+                    {"error": "body inválido: {pagina: int, zona: [x0,y0,x1,y1]}"}, 400
+                )
+            ESTADO.zonas_exclusion.setdefault(pagina, []).append(zona)
+            return self._json({"ok": True, "zonas_pagina": ESTADO.zonas_exclusion[pagina]})
+
+        if ruta == "/api/zonas_exclusion/limpiar":
+            pagina = body.get("pagina")
+            if pagina is None:
+                ESTADO.zonas_exclusion = {}
+            else:
+                ESTADO.zonas_exclusion.pop(pagina, None)
+            return self._json({"ok": True})
+
         if ruta == "/api/reglas_filtro":
-            body = self._leer_json()
             for regla_id, activa in body.items():
                 ESTADO.motor.config_filtro[regla_id] = bool(activa)
             ESTADO.guardar_config_filtro()
@@ -579,7 +614,6 @@ class ManejadorAPI(BaseHTTPRequestHandler):
             return self._json({"ok": True})
 
         if ruta == "/api/config":
-            body = self._leer_json()
             if "autor" in body:
                 ESTADO.autor = body["autor"] or "Corrector IA"
             for prov in PROVEEDORES:

@@ -91,3 +91,29 @@ def test_reaplicar_filtro_sin_hallazgos_previos_no_falla(monkeypatch):
     monkeypatch.setattr(sw.ESTADO, "hallazgos_crudos", [])
     resultado = sw.reaplicar_filtro_documental()
     assert resultado["ok"] is False
+
+
+# ── do_POST debe leer el body UNA sola vez ──────────────────────────────────
+# Bug real: /api/detener y /api/reaplicar_filtro no llamaban a _leer_json(),
+# así que el body ("{}" que siempre manda postJSON) quedaba sin consumir en
+# el socket. En una conexión HTTP/1.1 keep-alive esos bytes desincronizan la
+# SIGUIENTE petición en la misma conexión y esta se cuelga sin ningún error
+# visible (así se manifestó: el navegador dibujaba la zona de exclusión
+# correctamente, el servidor la aplicaba bien, pero el refresco de la tabla
+# de hallazgos que sigue inmediatamente después nunca volvía). La corrección
+# fue leer el body una sola vez al principio de do_POST, antes de despachar
+# a la ruta — este test evita que alguien reintroduzca una lectura extra
+# dentro de una rama de ruta.
+
+
+def test_do_post_lee_el_body_una_sola_vez():
+    fuente = Path(sw.__file__).read_text(encoding="utf-8")
+    inicio = fuente.index("def do_POST")
+    fin = fuente.index("\ndef main", inicio + 1)
+    cuerpo_metodo = fuente[inicio:fin]
+    assert cuerpo_metodo.count("self._leer_json()") == 1, (
+        "do_POST debe leer el body en un único punto compartido por todas las "
+        "rutas (salvo /api/subir_pdf, que lee el cuerpo crudo él mismo) — una "
+        "segunda llamada a _leer_json() dentro de una rama significa que las "
+        "demás ramas ya no consumen el body y el bug de keep-alive vuelve."
+    )

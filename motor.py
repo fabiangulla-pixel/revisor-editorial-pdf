@@ -1129,6 +1129,31 @@ def calcular_bboxes(hallazgos: list, ruta_pdf: str) -> list:
     return hallazgos
 
 
+def aplicar_zonas_exclusion(hallazgos: list, zonas: dict) -> list:
+    """Descarta los hallazgos cuyo bbox (ver calcular_bboxes) cae dentro de una
+    zona de exclusión que el usuario dibujó sobre el visor web. `zonas` es
+    {número_de_página: [[x0,y0,x1,y1], ...]} en el mismo espacio de puntos PDF
+    que bbox (las claves pueden venir como str, típico tras un roundtrip por
+    JSON). Un hallazgo sin bbox (fragmento no localizado en la página) nunca
+    se descarta por zona: no hay dónde comprobar si cae dentro."""
+    if not zonas:
+        return hallazgos
+
+    resultado = []
+    for h in hallazgos:
+        bbox = h.get("bbox")
+        pagina = h.get("pagina")
+        zonas_pagina = zonas.get(pagina) or zonas.get(str(pagina)) or []
+        if bbox and zonas_pagina:
+            cx = (bbox[0] + bbox[2]) / 2
+            cy = (bbox[1] + bbox[3]) / 2
+            dentro = any(z[0] <= cx <= z[2] and z[1] <= cy <= z[3] for z in zonas_pagina)
+            if dentro:
+                continue
+        resultado.append(h)
+    return resultado
+
+
 def generar_informes(
     hallazgos: list,
     nombre_pdf: str,
