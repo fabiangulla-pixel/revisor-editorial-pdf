@@ -386,6 +386,30 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .toggle input:checked + .toggle-slider { background: var(--accent); }
 .toggle input:checked + .toggle-slider::before { transform: translateX(18px); }
 
+/* ── parámetros numéricos del filtro (sliders) ──────────────────────── */
+#parametros-filtro h3 {
+  font-size: 0.85rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+.parametro-fila {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.parametro-fila:last-child { border-bottom: none; }
+.parametro-fila .regla-texto { flex: 1; }
+.parametro-valor { color: var(--accent); font-weight: 700; }
+.parametro-fila input[type="range"] {
+  width: 180px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
 /* ── entregables ─────────────────────────────────────────────────────── */
 .entregable-fila {
   display: flex;

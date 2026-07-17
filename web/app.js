@@ -377,9 +377,40 @@ function seleccionarHallazgo(idx) {
   mostrarEnVisor(h);
 }
 
-// ── ajustes de filtrado ───────────────────────────────────────────────────
+// ── ajustes de filtrado: parámetros numéricos (sliders) ──────────────────
+function renderParametrosFiltro(parametros) {
+  const cont = document.getElementById("parametros-filtro");
+  if (!parametros.length) { cont.innerHTML = ""; return; }
+  cont.innerHTML = `<h3>Parámetros</h3>` + parametros
+    .map((p) => {
+      const etiquetaValor = p.etiquetas_paso[p.valor] ?? p.etiquetas_paso[String(p.valor)] ?? p.valor;
+      return `
+      <div class="parametro-fila" data-id="${p.id}">
+        <div class="regla-texto">
+          <div class="regla-etiqueta">${escapeHtml(p.etiqueta)} — <span class="parametro-valor">${etiquetaValor}</span></div>
+          <div class="regla-descripcion">${escapeHtml(p.descripcion)}</div>
+        </div>
+        <input type="range" min="${p.min}" max="${p.max}" step="${p.paso}" value="${p.valor}" data-id="${p.id}" />
+      </div>`;
+    })
+    .join("");
+
+  cont.querySelectorAll("input[type=range]").forEach((input) => {
+    const p = parametros.find((x) => x.id === input.dataset.id);
+    const etiquetaEl = input.closest(".parametro-fila").querySelector(".parametro-valor");
+    input.addEventListener("input", () => {
+      const v = Number(input.value);
+      etiquetaEl.textContent = p.etiquetas_paso[v] ?? p.etiquetas_paso[String(v)] ?? v;
+    });
+    input.addEventListener("change", async () => {
+      await postJSON("/api/reglas_filtro", { [input.dataset.id]: Number(input.value) });
+    });
+  });
+}
+
 async function cargarAjustesFiltro() {
   const r = await getJSON("/api/reglas_filtro");
+  renderParametrosFiltro(r.parametros || []);
   const cont = document.getElementById("grupos-filtro");
   cont.innerHTML = "";
   Object.entries(r.grupos).forEach(([grupo, reglas]) => {

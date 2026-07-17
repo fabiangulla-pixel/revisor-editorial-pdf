@@ -912,6 +912,46 @@ REGLAS_FILTRO: list[tuple[str, str, str, str]] = [
     ),
 ]
 
+# Parámetros numéricos del filtro (id, etiqueta, descripción, min, max, paso,
+# default, {valor: etiqueta_del_paso}) — a diferencia de REGLAS_FILTRO (on/off),
+# cada uno controla un umbral real usado por MotorRevision._parametro(). Se
+# persisten en el mismo config_filtro.json que las reglas booleanas.
+PARAMETROS_FILTRO: list[tuple[str, str, str, float, float, float, float, dict]] = [
+    (
+        "gravedad_minima",
+        "Gravedad mínima a conservar",
+        "Descarta hallazgos por debajo de este nivel antes de anotar/exportar. El filtro "
+        "por chips en Hallazgos es solo de vista; este umbral sí reduce lo que se genera.",
+        0,
+        2,
+        1,
+        0,
+        {0: "Menor", 1: "Importante", 2: "Crítica"},
+    ),
+    (
+        "certeza_minima",
+        "Certeza mínima del modelo",
+        "Descarta hallazgos donde el modelo declaró menos certeza que este nivel.",
+        0,
+        2,
+        1,
+        0,
+        {0: "Baja", 1: "Media", 2: "Alta"},
+    ),
+    (
+        "umbral_norma_comillas",
+        "Sensibilidad de la norma de comillas",
+        "Proporción mínima de un estilo de comillas («» o “”) en el documento para "
+        "considerarlo la norma y descartar quejas del estilo contrario. Más alto = más "
+        "estricto (hace falta mayor consistencia antes de aplicar el descarte).",
+        0.5,
+        1.0,
+        0.05,
+        0.9,
+        {},
+    ),
+]
+
 
 def texto_anotacion(h: dict) -> str:
     """Texto VISIBLE del globo, con la voz natural del corrector (FAGV).
@@ -1379,6 +1419,15 @@ class MotorRevision:
         """
         return self.config_filtro.get(regla_id, True)
 
+    _ORDEN_GRAVEDAD = {"menor": 0, "importante": 1, "critica": 2}
+    _ORDEN_CERTEZA = {"baja": 0, "media": 1, "alta": 2}
+
+    def _parametro(self, param_id: str) -> float:
+        """Valor configurado del parámetro numérico `param_id` (ver
+        PARAMETROS_FILTRO), o su default si no está en config_filtro."""
+        default = next(p[6] for p in PARAMETROS_FILTRO if p[0] == param_id)
+        return self.config_filtro.get(param_id, default)
+
     def _filtrar_particiones(self, hallazgos: list) -> list:
         """Descarta hallazgos de partición de palabras que son artefactos de PyMuPDF.
 
@@ -1620,7 +1669,9 @@ class MotorRevision:
         texto = "".join(p.get_text("text") for p in doc)
         inglesas = texto.count("“") + texto.count("”")
         latinas = texto.count("«") + texto.count("»")
-        return self._norma_desde_conteos(inglesas, latinas)
+        return self._norma_desde_conteos(
+            inglesas, latinas, umbral=self._parametro("umbral_norma_comillas")
+        )
 
     def _spans_de_fragmento(self, doc, h: dict):
         """Localiza el fragmento en su página y devuelve sus spans
@@ -1890,4 +1941,21 @@ class MotorRevision:
             self._log(f"  Filtro documental: {total} falso(s) positivo(s) descartado(s)")
             for motivo, n in sorted(motivos.items(), key=lambda x: -x[1]):
                 self._log(f"     · {motivo}: {n}")
+
+        gravedad_minima = self._parametro("gravedad_minima")
+        certeza_minima = self._parametro("certeza_minima")
+        if gravedad_minima > 0 or certeza_minima > 0:
+            antes = len(resultado)
+            resultado = [
+                h
+                for h in resultado
+                if self._ORDEN_GRAVEDAD.get(h.get("gravedad", "menor"), 0) >= gravedad_minima
+                and self._ORDEN_CERTEZA.get(h.get("certeza", "media"), 1) >= certeza_minima
+            ]
+            if len(resultado) != antes:
+                self._log(
+                    f"  Umbral de gravedad/certeza: {antes - len(resultado)} hallazgo(s) "
+                    "descartado(s) por debajo del mínimo configurado"
+                )
+
         return resultado

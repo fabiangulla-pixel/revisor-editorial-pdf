@@ -25,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 
 from motor import (
     ASUNTOS,
+    PARAMETROS_FILTRO,
     REGLAS_FILTRO,
     AnalizadorPDF,
     ClaudeProveedor,
@@ -136,8 +137,15 @@ class EstadoServidor:
             guardado = json.loads(ruta.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
-        ids_validos = {r[0] for r in REGLAS_FILTRO}
-        self.motor.config_filtro = {k: bool(v) for k, v in guardado.items() if k in ids_validos}
+        ids_reglas = {r[0] for r in REGLAS_FILTRO}
+        ids_parametros = {p[0] for p in PARAMETROS_FILTRO}
+        config: dict = {}
+        for k, v in guardado.items():
+            if k in ids_reglas:
+                config[k] = bool(v)
+            elif k in ids_parametros:
+                config[k] = float(v)
+        self.motor.config_filtro = config
 
     def guardar_config_filtro(self):
         ruta = _ruta_config_filtro()
@@ -145,6 +153,8 @@ class EstadoServidor:
             regla_id: self.motor.config_filtro.get(regla_id, True)
             for regla_id, _, _, _ in REGLAS_FILTRO
         }
+        for param_id, _, _, _, _, _, default, _ in PARAMETROS_FILTRO:
+            datos[param_id] = self.motor.config_filtro.get(param_id, default)
         ruta.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # ── construcción del proveedor de IA ────────────────────────────────
@@ -482,7 +492,22 @@ class ManejadorAPI(BaseHTTPRequestHandler):
                         "activa": ESTADO.motor.config_filtro.get(regla_id, True),
                     }
                 )
-            return self._json({"grupos": grupos})
+            parametros = [
+                {
+                    "id": param_id,
+                    "etiqueta": etiqueta,
+                    "descripcion": descripcion,
+                    "min": mini,
+                    "max": maxi,
+                    "paso": paso,
+                    "valor": ESTADO.motor.config_filtro.get(param_id, default),
+                    "etiquetas_paso": etiquetas_paso,
+                }
+                for param_id, etiqueta, descripcion, mini, maxi, paso, default, etiquetas_paso in (
+                    PARAMETROS_FILTRO
+                )
+            ]
+            return self._json({"grupos": grupos, "parametros": parametros})
 
         if ruta == "/api/proveedores":
             from costos import MODELOS_DISPONIBLES, MODELOS_OLLAMA_SUGERIDOS
@@ -660,14 +685,21 @@ class ManejadorAPI(BaseHTTPRequestHandler):
             return self._json({"ok": True})
 
         if ruta == "/api/reglas_filtro":
-            for regla_id, activa in body.items():
-                ESTADO.motor.config_filtro[regla_id] = bool(activa)
+            ids_reglas = {r[0] for r in REGLAS_FILTRO}
+            ids_parametros = {p[0] for p in PARAMETROS_FILTRO}
+            for clave, valor in body.items():
+                if clave in ids_reglas:
+                    ESTADO.motor.config_filtro[clave] = bool(valor)
+                elif clave in ids_parametros:
+                    ESTADO.motor.config_filtro[clave] = float(valor)
             ESTADO.guardar_config_filtro()
             return self._json({"ok": True})
 
         if ruta == "/api/reglas_filtro/restablecer":
             for regla_id, _, _, _ in REGLAS_FILTRO:
                 ESTADO.motor.config_filtro[regla_id] = True
+            for param_id, _, _, _, _, _, default, _ in PARAMETROS_FILTRO:
+                ESTADO.motor.config_filtro[param_id] = default
             ESTADO.guardar_config_filtro()
             return self._json({"ok": True})
 

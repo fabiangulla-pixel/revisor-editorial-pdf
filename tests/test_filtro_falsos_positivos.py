@@ -13,7 +13,12 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from motor import MotorRevision, aplicar_zonas_exclusion, calcular_bboxes  # noqa: E402
+from motor import (  # noqa: E402
+    PARAMETROS_FILTRO,
+    MotorRevision,
+    aplicar_zonas_exclusion,
+    calcular_bboxes,
+)
 
 # ── Norma de comillas (lógica pura) ─────────────────────────────────────────
 
@@ -473,3 +478,105 @@ def test_zona_hallazgo_sin_bbox_nunca_se_descarta():
     zonas = {1: [[0, 0, 1000, 1000]]}  # cubre toda la página
     resultado = aplicar_zonas_exclusion(hallazgos, zonas)
     assert len(resultado) == 1
+
+
+# ── Parámetros numéricos del filtro (gravedad/certeza mínima, umbral comillas) ──
+
+
+def _pdf_vacio(tmp_path, nombre="vacio.pdf"):
+    import fitz
+
+    ruta = tmp_path / nombre
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(str(ruta))
+    doc.close()
+    return str(ruta)
+
+
+def _hallazgo_simple(gravedad="menor", certeza="media"):
+    return {
+        "pagina": 1,
+        "descripcion": "algo",
+        "fragmento": "algo",
+        "correccion": "",
+        "categoria": "otros",
+        "gravedad": gravedad,
+        "certeza": certeza,
+    }
+
+
+def test_parametro_usa_default_sin_config():
+    motor = MotorRevision()
+    assert motor._parametro("gravedad_minima") == 0
+    assert motor._parametro("certeza_minima") == 0
+    assert motor._parametro("umbral_norma_comillas") == 0.9
+
+
+def test_parametro_usa_valor_configurado():
+    motor = MotorRevision(config_filtro={"gravedad_minima": 2})
+    assert motor._parametro("gravedad_minima") == 2
+
+
+def test_parametros_filtro_tiene_default_consistente_con_metodo():
+    motor = MotorRevision()
+    for param_id, _, _, _, _, _, default, _ in PARAMETROS_FILTRO:
+        assert motor._parametro(param_id) == default
+
+
+def test_gravedad_minima_descarta_por_debajo_del_umbral(tmp_path):
+    ruta = _pdf_vacio(tmp_path)
+    motor = MotorRevision(config_filtro={"gravedad_minima": 2})  # solo crítica
+    hallazgos = [
+        _hallazgo_simple(gravedad="menor"),
+        _hallazgo_simple(gravedad="importante"),
+        _hallazgo_simple(gravedad="critica"),
+    ]
+    resultado = motor._filtrar_falsos_positivos(hallazgos, ruta)
+    assert len(resultado) == 1
+    assert resultado[0]["gravedad"] == "critica"
+
+
+def test_certeza_minima_descarta_por_debajo_del_umbral(tmp_path):
+    ruta = _pdf_vacio(tmp_path)
+    motor = MotorRevision(config_filtro={"certeza_minima": 2})  # solo alta
+    hallazgos = [
+        _hallazgo_simple(certeza="baja"),
+        _hallazgo_simple(certeza="media"),
+        _hallazgo_simple(certeza="alta"),
+    ]
+    resultado = motor._filtrar_falsos_positivos(hallazgos, ruta)
+    assert len(resultado) == 1
+    assert resultado[0]["certeza"] == "alta"
+
+
+def test_sin_parametros_configurados_no_descarta_por_umbral(tmp_path):
+    ruta = _pdf_vacio(tmp_path)
+    motor = MotorRevision()
+    hallazgos = [_hallazgo_simple(gravedad="menor", certeza="baja")]
+    resultado = motor._filtrar_falsos_positivos(hallazgos, ruta)
+    assert len(resultado) == 1
+
+
+class _PaginaFalsa:
+    """Sustituto de fitz.Page para _detectar_norma_comillas: solo necesita
+    .get_text('text'). Evita depender de que la fuente base de PyMuPDF
+    soporte los glifos de comillas al insertar/extraer texto real."""
+
+    def __init__(self, texto):
+        self._texto = texto
+
+    def get_text(self, _modo):
+        return self._texto
+
+
+def test_umbral_norma_comillas_configurable():
+    # 89% inglesas: no llega al umbral default (0.9) -> "mixta"; con un umbral
+    # más laxo (0.8) sí alcanza para considerarlo norma "inglesas".
+    doc_falso = [_PaginaFalsa("“a” " * 89 + "«b» " * 11)]
+
+    motor_estricto = MotorRevision()
+    assert motor_estricto._detectar_norma_comillas(doc_falso) == "mixta"
+
+    motor_laxo = MotorRevision(config_filtro={"umbral_norma_comillas": 0.8})
+    assert motor_laxo._detectar_norma_comillas(doc_falso) == "inglesas"
