@@ -35,6 +35,7 @@ from motor import (
     PerfilEstilo,
     PerplexityProveedor,
     anotar_pdf,
+    calcular_bboxes,
     generar_informes,
     generar_xfdf,
 )
@@ -251,6 +252,7 @@ def ejecutar_revision(ruta_pdf: str, proveedor_id: str):
                     f"Tras filtro documental: {len(estado.hallazgos)} hallazgos "
                     f"({antes_fp - len(estado.hallazgos)} descartados)"
                 )
+            estado.hallazgos = calcular_bboxes(estado.hallazgos, ruta_pdf)
             _generar_entregables(ruta_pdf)
 
         estado.progreso = {
@@ -323,6 +325,7 @@ def reaplicar_filtro_documental() -> dict:
     estado.hallazgos = estado.motor._filtrar_falsos_positivos(
         list(estado.hallazgos_crudos), estado.ruta_pdf_analizada
     )
+    estado.hallazgos = calcular_bboxes(estado.hallazgos, estado.ruta_pdf_analizada)
     estado._log(
         f"Filtro reaplicado con los Ajustes actuales: {len(estado.hallazgos)}/{antes} "
         "hallazgos conservados (sin gastar en el LLM).",
@@ -383,8 +386,12 @@ class ManejadorAPI(BaseHTTPRequestHandler):
 
         if ruta == "/":
             return self._archivo_estatico(WEB_DIR / "index.html")
-        if ruta in ("/app.js", "/styles.css"):
-            return self._archivo_estatico(WEB_DIR / ruta.lstrip("/"))
+        if ruta in ("/app.js", "/styles.css") or ruta.startswith("/vendor/"):
+            destino = (WEB_DIR / ruta.lstrip("/")).resolve()
+            raiz = WEB_DIR.resolve()
+            if raiz != destino and raiz not in destino.parents:
+                return self._json({"error": "ruta inválida"}, 403)
+            return self._archivo_estatico(destino)
 
         if ruta == "/api/estado":
             return self._json(
@@ -444,6 +451,21 @@ class ManejadorAPI(BaseHTTPRequestHandler):
 
         if ruta == "/api/categorias":
             return self._json({"categorias": ASUNTOS})
+
+        if ruta == "/api/pdf/ver":
+            # El PDF original analizado, para que el visor embebido (PDF.js)
+            # lo renderice en el navegador — nunca sale de 127.0.0.1.
+            ruta_pdf = ESTADO.ruta_pdf_analizada
+            if not ruta_pdf or not Path(ruta_pdf).exists():
+                return self._json({"error": "no hay un PDF analizado todavía"}, 404)
+            datos = Path(ruta_pdf).read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Length", str(len(datos)))
+            self.send_header("Accept-Ranges", "none")
+            self.end_headers()
+            self.wfile.write(datos)
+            return
 
         if ruta.startswith("/api/entregables/descargar"):
             tipo = qs.get("tipo", [""])[0]

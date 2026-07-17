@@ -76,15 +76,38 @@
   <section class="vista" id="vista-hallazgos">
     <div class="chips-barra" id="chips-gravedad"></div>
     <div class="chips-barra" id="chips-categoria"></div>
-    <div class="hallazgos-layout">
-      <div class="mapa-hallazgos" id="mapa-hallazgos"></div>
-      <div class="tabla-hallazgos-wrap">
-        <table class="tabla-hallazgos">
-          <thead>
-            <tr><th>Pág.</th><th>Gravedad</th><th>Categoría</th><th>Descripción</th><th>Fragmento</th><th>Corrección</th></tr>
-          </thead>
-          <tbody id="tabla-hallazgos-body"></tbody>
-        </table>
+
+    <div class="hallazgos-split">
+      <div class="visor-pdf" id="visor-pdf">
+        <div class="visor-toolbar">
+          <button class="btn" id="visor-anterior" title="Página anterior">‹</button>
+          <span class="visor-pagina-info" id="visor-pagina-info">—</span>
+          <button class="btn" id="visor-siguiente" title="Página siguiente">›</button>
+          <span class="visor-sep"></span>
+          <button class="btn" id="visor-zoom-menos" title="Alejar">−</button>
+          <span class="visor-pagina-info" id="visor-zoom-pct">100%</span>
+          <button class="btn" id="visor-zoom-mas" title="Acercar">+</button>
+          <span class="visor-sep"></span>
+          <button class="btn" id="visor-modo-zona" title="Dibujar zona de exclusión">▭ Zona</button>
+          <button class="btn" id="visor-limpiar-zonas" title="Quitar zonas de esta página">Limpiar zonas</button>
+        </div>
+        <div class="visor-canvas-wrap" id="visor-canvas-wrap">
+          <div class="visor-vacio" id="visor-vacio">Haz clic en un hallazgo para ver dónde cae en la página.</div>
+          <canvas id="visor-canvas"></canvas>
+          <canvas id="visor-overlay"></canvas>
+        </div>
+      </div>
+
+      <div class="hallazgos-layout">
+        <div class="mapa-hallazgos" id="mapa-hallazgos"></div>
+        <div class="tabla-hallazgos-wrap">
+          <table class="tabla-hallazgos">
+            <thead>
+              <tr><th>Pág.</th><th>Gravedad</th><th>Categoría</th><th>Descripción</th><th>Fragmento</th><th>Corrección</th></tr>
+            </thead>
+            <tbody id="tabla-hallazgos-body"></tbody>
+          </table>
+        </div>
       </div>
     </div>
     <div class="conteo-hallazgos" id="conteo-hallazgos"></div>
@@ -135,6 +158,6 @@
   </div>
 </div>
 
-<script src="/app.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>

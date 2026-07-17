@@ -1,5 +1,8 @@
 "use strict";
 
+import * as pdfjsLib from "./vendor/pdfjs/pdf.min.mjs";
+pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdfjs/pdf.worker.min.mjs";
+
 const API = "";
 
 // ── utilidades ────────────────────────────────────────────────────────────
@@ -313,8 +316,11 @@ function hallazgosFiltrados() {
   );
 }
 
+let itemsActuales = [];
+
 function renderHallazgos() {
   const items = hallazgosFiltrados();
+  itemsActuales = items;
   const body = document.getElementById("tabla-hallazgos-body");
   body.innerHTML = items
     .map(
@@ -331,6 +337,10 @@ function renderHallazgos() {
     .join("");
   document.getElementById("conteo-hallazgos").textContent = `${items.length} de ${hallazgosCache.length} hallazgo(s)`;
 
+  body.querySelectorAll("tr[data-idx]").forEach((fila) => {
+    fila.addEventListener("click", () => seleccionarHallazgo(Number(fila.dataset.idx)));
+  });
+
   renderMapaHallazgos(items);
 }
 
@@ -346,16 +356,23 @@ function renderMapaHallazgos(items) {
     punto.style.height = altoPunto + "px";
     punto.style.background = COLOR_GRAVEDAD[h.gravedad] || "#6c7086";
     punto.title = `Pág. ${h.pagina} — ${h.descripcion || ""}`;
-    punto.addEventListener("click", () => {
-      const fila = document.querySelector(`tr[data-idx="${i}"]`);
-      if (fila) {
-        fila.scrollIntoView({ block: "center", behavior: "smooth" });
-        document.querySelectorAll(".tabla-hallazgos tr.resaltada").forEach((f) => f.classList.remove("resaltada"));
-        fila.classList.add("resaltada");
-      }
-    });
+    punto.addEventListener("click", () => seleccionarHallazgo(i));
     mapa.appendChild(punto);
   });
+}
+
+function seleccionarHallazgo(idx) {
+  const h = itemsActuales[idx];
+  if (!h) return;
+  const fila = document.querySelector(`tr[data-idx="${idx}"]`);
+  if (fila) {
+    fila.scrollIntoView({ block: "center", behavior: "smooth" });
+    document
+      .querySelectorAll(".tabla-hallazgos tr.resaltada")
+      .forEach((f) => f.classList.remove("resaltada"));
+    fila.classList.add("resaltada");
+  }
+  mostrarEnVisor(h);
 }
 
 // ── ajustes de filtrado ───────────────────────────────────────────────────
@@ -399,6 +416,113 @@ document.getElementById("btn-reaplicar").addEventListener("click", async () => {
 document.getElementById("btn-restablecer").addEventListener("click", async () => {
   await postJSON("/api/reglas_filtro/restablecer", {});
   cargarAjustesFiltro();
+});
+
+// ── visor de PDF embebido (PDF.js) ───────────────────────────────────────
+let pdfDoc = null;
+let cargandoPdf = null;
+let paginaVisorActual = 1;
+let escalaVisor = 1.3;
+let hallazgoVisorActivo = null;
+
+const visorCanvas = document.getElementById("visor-canvas");
+const visorOverlay = document.getElementById("visor-overlay");
+const visorVacio = document.getElementById("visor-vacio");
+
+async function cargarPdfSiHaceFalta() {
+  if (pdfDoc) return pdfDoc;
+  if (!cargandoPdf) {
+    // disableRange/disableStream: nuestro servidor local siempre sirve el
+    // archivo completo en una sola respuesta (no soporta Range de verdad),
+    // así que la carga progresiva de PDF.js solo añade complejidad sin
+    // beneficio — se pide un fetch simple y completo.
+    cargandoPdf = pdfjsLib
+      .getDocument({ url: "/api/pdf/ver", disableRange: true, disableStream: true })
+      .promise.then((doc) => {
+        pdfDoc = doc;
+        return doc;
+      });
+  }
+  return cargandoPdf;
+}
+
+async function mostrarEnVisor(hallazgo) {
+  hallazgoVisorActivo = hallazgo;
+  visorVacio.style.display = "none";
+  try {
+    await cargarPdfSiHaceFalta();
+  } catch (e) {
+    visorVacio.style.display = "flex";
+    visorVacio.textContent = "No se pudo cargar el PDF: " + e.message;
+    return;
+  }
+  paginaVisorActual = Math.min(Math.max(1, hallazgo.pagina || 1), pdfDoc.numPages);
+  await renderizarPaginaVisor();
+}
+
+async function renderizarPaginaVisor() {
+  if (!pdfDoc) return;
+  const page = await pdfDoc.getPage(paginaVisorActual);
+  const viewport = page.getViewport({ scale: escalaVisor });
+  visorCanvas.width = viewport.width;
+  visorCanvas.height = viewport.height;
+  visorOverlay.width = viewport.width;
+  visorOverlay.height = viewport.height;
+  const ctx = visorCanvas.getContext("2d");
+  await page.render({ canvasContext: ctx, viewport }).promise;
+
+  document.getElementById("visor-pagina-info").textContent = `Pág. ${paginaVisorActual} / ${pdfDoc.numPages}`;
+  document.getElementById("visor-zoom-pct").textContent = Math.round(escalaVisor * 100) + "%";
+
+  redibujarOverlay();
+}
+
+function redibujarOverlay() {
+  const ctx = visorOverlay.getContext("2d");
+  ctx.clearRect(0, 0, visorOverlay.width, visorOverlay.height);
+
+  if (
+    hallazgoVisorActivo &&
+    hallazgoVisorActivo.pagina === paginaVisorActual &&
+    hallazgoVisorActivo.bbox
+  ) {
+    const [x0, y0, x1, y1] = hallazgoVisorActivo.bbox;
+    const color = COLOR_GRAVEDAD[hallazgoVisorActivo.gravedad] || "#cba6f7";
+    const px = x0 * escalaVisor;
+    const py = y0 * escalaVisor;
+    const pw = (x1 - x0) * escalaVisor;
+    const ph = (y1 - y0) * escalaVisor;
+    ctx.fillStyle = color + "55";
+    ctx.fillRect(px - 3, py - 3, pw + 6, ph + 6);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px - 3, py - 3, pw + 6, ph + 6);
+  }
+
+  dibujarZonasExclusion(ctx);
+}
+
+function dibujarZonasExclusion(_ctx) {
+  // Implementado en el siguiente paso (zonas de exclusión dibujables).
+}
+
+document.getElementById("visor-anterior").addEventListener("click", async () => {
+  if (!pdfDoc || paginaVisorActual <= 1) return;
+  paginaVisorActual--;
+  await renderizarPaginaVisor();
+});
+document.getElementById("visor-siguiente").addEventListener("click", async () => {
+  if (!pdfDoc || paginaVisorActual >= pdfDoc.numPages) return;
+  paginaVisorActual++;
+  await renderizarPaginaVisor();
+});
+document.getElementById("visor-zoom-menos").addEventListener("click", async () => {
+  escalaVisor = Math.max(0.5, escalaVisor - 0.2);
+  if (pdfDoc) await renderizarPaginaVisor();
+});
+document.getElementById("visor-zoom-mas").addEventListener("click", async () => {
+  escalaVisor = Math.min(3, escalaVisor + 0.2);
+  if (pdfDoc) await renderizarPaginaVisor();
 });
 
 // ── arranque ──────────────────────────────────────────────────────────────

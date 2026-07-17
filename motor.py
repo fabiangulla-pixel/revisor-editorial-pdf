@@ -1095,6 +1095,40 @@ def generar_xfdf(ruta_original: str, hallazgos: list, ruta_salida: str, autor: s
         f.write(xml_bonito)
 
 
+def calcular_bboxes(hallazgos: list, ruta_pdf: str) -> list:
+    """Añade `bbox: [x0, y0, x1, y1]` (puntos PDF, origen arriba-izquierda,
+    igual convención que page.get_pixmap()) a cada hallazgo cuyo fragmento se
+    ubique en la página — o `bbox: None` si no se encuentra. Mismo patrón de
+    búsqueda que `anotar_pdf`/`generar_xfdf` (fragmento completo, si falla los
+    primeros 40 caracteres), para que el visor web resalte exactamente donde
+    cae la anotación real.
+
+    Estas coordenadas están en el mismo espacio que `page.rect` de PyMuPDF, que
+    coincide con el `viewport` de PDF.js a escala 1 — el cliente solo necesita
+    multiplicar por su factor de zoom actual para dibujar el resaltado."""
+    try:
+        doc = fitz.open(ruta_pdf)
+    except Exception:
+        for h in hallazgos:
+            h["bbox"] = None
+        return hallazgos
+
+    for h in hallazgos:
+        idx = h.get("pagina", 1) - 1
+        fragmento = (h.get("fragmento") or "").strip()
+        h["bbox"] = None
+        if not (0 <= idx < doc.page_count) or len(fragmento) <= 3:
+            continue
+        pagina = doc[idx]
+        rects = pagina.search_for(fragmento) or pagina.search_for(fragmento[:40])
+        if rects:
+            r = rects[0]
+            h["bbox"] = [round(r.x0, 2), round(r.y0, 2), round(r.x1, 2), round(r.y1, 2)]
+
+    doc.close()
+    return hallazgos
+
+
 def generar_informes(
     hallazgos: list,
     nombre_pdf: str,

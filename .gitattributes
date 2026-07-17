@@ -19,3 +19,7 @@
 *.docx binary
 *.xlsx binary
 *.exe binary
+
+# Vendorizado de terceros: conservar tal cual se descargó, sin normalizar
+# fin de línea ni generar diffs línea a línea (está minificado).
+web/vendor/** binary linguist-vendored

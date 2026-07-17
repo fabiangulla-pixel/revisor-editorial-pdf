@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from motor import MotorRevision  # noqa: E402
+from motor import MotorRevision, calcular_bboxes  # noqa: E402
 
 # ── Norma de comillas (lógica pura) ─────────────────────────────────────────
 
@@ -384,3 +384,46 @@ def test_verificar_detectado_cuando_esta_solo_en_la_correccion():
     correccion = "verificar y completar la url"
     assert MotorRevision._RE_VERIFICAR.search(desc) is None
     assert MotorRevision._RE_VERIFICAR.search(correccion) is not None
+
+
+# ── calcular_bboxes: coordenadas para el visor web embebido ─────────────────
+
+
+def test_calcular_bboxes_encuentra_fragmento_real(tmp_path):
+    import fitz
+
+    ruta_pdf = tmp_path / "una_pagina.pdf"
+    doc = fitz.open()
+    pagina = doc.new_page()
+    pagina.insert_text((72, 100), "Un fragmento de prueba localizable.")
+    ancho_pagina = pagina.rect.width
+    doc.save(str(ruta_pdf))
+    doc.close()
+
+    hallazgos = [{"pagina": 1, "fragmento": "fragmento de prueba"}]
+    resultado = calcular_bboxes(hallazgos, str(ruta_pdf))
+
+    assert resultado[0]["bbox"] is not None
+    x0, y0, x1, y1 = resultado[0]["bbox"]
+    assert x1 > x0 and y1 > y0  # rectángulo con área positiva
+    assert 0 <= x0 <= ancho_pagina  # dentro de los límites de la página
+
+
+def test_calcular_bboxes_fragmento_ausente_da_none(tmp_path):
+    import fitz
+
+    ruta_pdf = tmp_path / "vacio.pdf"
+    doc = fitz.open()
+    doc.new_page()
+    doc.save(str(ruta_pdf))
+    doc.close()
+
+    hallazgos = [{"pagina": 1, "fragmento": "esto no está en la página"}]
+    resultado = calcular_bboxes(hallazgos, str(ruta_pdf))
+    assert resultado[0]["bbox"] is None
+
+
+def test_calcular_bboxes_pdf_invalido_no_lanza():
+    hallazgos = [{"pagina": 1, "fragmento": "algo"}]
+    resultado = calcular_bboxes(hallazgos, "/ruta/que/no/existe.pdf")
+    assert resultado[0]["bbox"] is None
