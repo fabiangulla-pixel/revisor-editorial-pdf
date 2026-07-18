@@ -442,6 +442,8 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
   box-shadow: var(--shadow);
 }
 .modal h2 { margin-top: 0; font-size: 1.05rem; }
+#login-error { color: var(--critica); min-height: 1.2em; margin-top: 6px; }
+#login-password { width: 100%; box-sizing: border-box; }
 .modal pre {
   background: #11111b;
   padding: 14px;

@@ -6,8 +6,17 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdfjs/pdf.worker.min.mjs";
 const API = "";
 
 // ── utilidades ────────────────────────────────────────────────────────────
+// /api/sesion y /api/login están exentas: un 401 en ellas es parte normal de
+// su propio flujo (login incorrecto, chequeo de sesión sin cookie), no una
+// sesión vencida a mitad de uso.
+const RUTAS_401_ESPERADO = new Set(["/api/sesion", "/api/login"]);
+
 async function getJSON(url) {
   const r = await fetch(API + url);
+  if (r.status === 401 && !RUTAS_401_ESPERADO.has(url)) {
+    mostrarLogin();
+    return {};
+  }
   return r.json();
 }
 async function postJSON(url, body) {
@@ -16,6 +25,10 @@ async function postJSON(url, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body || {}),
   });
+  if (r.status === 401 && !RUTAS_401_ESPERADO.has(url)) {
+    mostrarLogin();
+    return {};
+  }
   return r.json();
 }
 
@@ -93,6 +106,11 @@ let CATALOGO = null;
 async function cargarProveedores() {
   CATALOGO = await getJSON("/api/proveedores");
   document.getElementById("cfg-autor").value = CATALOGO.autor || "";
+  if (CATALOGO.modo_publico) {
+    // No hay Ollama local disponible en un servidor remoto.
+    const opcionOllama = document.querySelector('#sel-proveedor option[value="ollama"]');
+    if (opcionOllama) opcionOllama.remove();
+  }
   actualizarModelos();
   renderKeysConfig();
 }
@@ -698,6 +716,48 @@ document.getElementById("visor-zoom-mas").addEventListener("click", async () => 
   if (pdfDoc) await renderizarPaginaVisor();
 });
 
+// ── login (solo aplica si el servidor está en modo público) ──────────────
+function mostrarLogin() {
+  document.getElementById("modal-login-fondo").classList.add("activo");
+}
+function ocultarLogin() {
+  document.getElementById("modal-login-fondo").classList.remove("activo");
+}
+
+async function intentarLogin() {
+  const clave = document.getElementById("login-password").value;
+  const errEl = document.getElementById("login-error");
+  errEl.textContent = "";
+  const r = await fetch("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: clave }),
+  });
+  const datos = await r.json();
+  if (!r.ok) {
+    errEl.textContent = datos.error || "Error de autenticación.";
+    return;
+  }
+  ocultarLogin();
+  arrancarApp();
+}
+
+document.getElementById("login-entrar").addEventListener("click", intentarLogin);
+document.getElementById("login-password").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") intentarLogin();
+});
+
 // ── arranque ──────────────────────────────────────────────────────────────
-cargarProveedores();
-actualizarEstado();
+function arrancarApp() {
+  cargarProveedores();
+  actualizarEstado();
+}
+
+(async () => {
+  const sesion = await getJSON("/api/sesion");
+  if (sesion.modo_publico && !sesion.autenticado) {
+    mostrarLogin();
+  } else {
+    arrancarApp();
+  }
+})();

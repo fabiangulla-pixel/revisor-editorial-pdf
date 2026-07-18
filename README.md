@@ -97,4 +97,38 @@ de falsos positivos están activas) se editan desde la pestaña "Ajustes de
 filtrado" (escritorio) o la vista equivalente (web), y se guardan en
 `config_filtro.json` — no versionado, es configuración local de cada instalación.
 
+## Desplegar en Render (modo público)
+
+`servidor_web.py` tiene dos modos: **local** (por defecto, un único usuario,
+sin login — el de siempre) y **público** (para exponerlo en internet, tipo
+Errata). El modo se activa por la sola presencia de la variable de entorno
+`REVISOR_PASSWORD` — sin ella, el comportamiento es idéntico al de hoy.
+
+En modo público: login con esa contraseña compartida, una sesión aislada por
+cookie por visitante (nadie ve el PDF/hallazgos de otro), no hay Ollama
+disponible (no hay modelo local en el servidor remoto — cada visitante debe
+poner su propia API key de OpenAI/Gemini/Claude/Perplexity en Configuración;
+el dueño del despliegue no paga por el uso de desconocidos), y ni las API
+keys ni los ajustes de filtro de un visitante se escriben a disco compartido.
+
+Pasos:
+
+1. Este repo necesita un remoto en GitHub (hoy es un repo local). Crear el
+   repositorio y hacer el primer push.
+2. En Render: **New → Blueprint**, apuntar al repo (usa `render.yaml`, ya
+   incluido) o **New → Web Service** manual con:
+   - Build command: `pip install -r requirements.txt`
+   - Start command: `python servidor_web.py`
+3. En la pestaña Environment del servicio, agregar `REVISOR_PASSWORD` con la
+   contraseña que vas a compartir con los usuarios — nunca se commitea al
+   repo (`render.yaml` la deja marcada como `sync: false` a propósito).
+4. Render expone HTTPS y dominio automáticamente; `servidor_web.py` lee el
+   puerto de la variable `PORT` que Render inyecta solo, no hace falta
+   configurarlo.
+
+Las sesiones inactivas por más de 6 horas se liberan solas (memoria y
+archivos subidos). El plan Starter ($7/mes) mantiene el servicio siempre
+encendido — el free tier de Render "duerme" tras 15 min sin tráfico y el
+primer request tras eso tarda ~30-60s en responder.
+
 Ver `CHANGELOG.md` para el historial de cambios.

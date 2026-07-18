@@ -1,0 +1,18 @@
+# Despliegue en Render (https://render.com) del Revisor Editorial PDF en modo
+# público. Ver la sección "Desplegar en Render" del README para el paso a
+# paso completo (crear el servicio, cargar REVISOR_PASSWORD como secreto).
+#
+# REVISOR_PASSWORD NO se define aquí (sync: false) — se carga a mano en el
+# dashboard de Render, nunca se commitea. Su sola presencia activa el modo
+# público en servidor_web.py (sesión por cookie, login, sin persistir keys ni
+# ajustes a disco compartido — ver MODO_PUBLICO en servidor_web.py).
+services:
+  - type: web
+    name: revisor-editorial-pdf
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: python servidor_web.py
+    envVars:
+      - key: REVISOR_PASSWORD
+        sync: false
