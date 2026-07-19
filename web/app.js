@@ -33,6 +33,12 @@ async function postJSON(url, body) {
 }
 
 const COLOR_GRAVEDAD = { critica: "#f38ba8", importante: "#fab387", menor: "#a6e3a1" };
+// Certeza es una señal que el filtro ya usa para decidir qué conservar, pero
+// hasta ahora se descartaba después de filtrar — mostrarla evita que un
+// hallazgo de certeza baja que sí se conservó se vea igual de confiable que
+// uno de certeza alta (patrón "taxonomía de confianza no binaria").
+const ETIQUETA_CERTEZA = { alta: "certeza alta", media: "certeza media", baja: "certeza baja" };
+const CLASE_CERTEZA = { alta: "badge-certeza-alta", media: "badge-certeza-media", baja: "badge-certeza-baja" };
 
 // ── navegación por pestañas (con hash bookmarkable, p. ej. #hallazgos) ──
 function irATab(nombre) {
@@ -348,6 +354,7 @@ function renderHallazgos() {
       <tr data-idx="${i}">
         <td>${h.pagina}</td>
         <td><span class="badge-gravedad badge-${h.gravedad}">${h.gravedad}</span></td>
+        <td><span class="badge-gravedad ${CLASE_CERTEZA[h.certeza] || ""}">${ETIQUETA_CERTEZA[h.certeza] || h.certeza || ""}</span></td>
         <td>${(categoriasTodas[h.categoria] || h.categoria || "").toString()}</td>
         <td>${escapeHtml(h.descripcion || "")}</td>
         <td>${escapeHtml((h.fragmento || "").slice(0, 45))}</td>
@@ -396,6 +403,55 @@ function seleccionarHallazgo(idx) {
 }
 
 // ── ajustes de filtrado: parámetros numéricos (sliders) ──────────────────
+// Cada slider trae un ejemplo visual fijo que se recalcula en vivo al
+// moverlo, para que el efecto del umbral se vea de inmediato sobre un caso
+// concreto en vez de quedar como un número abstracto.
+const EJEMPLOS_HALLAZGOS = [
+  { gravedad: "critica", certeza: "alta", texto: "«Kant» escrito «Khant»" },
+  { gravedad: "importante", certeza: "media", texto: "Posible ambigüedad de fecha: «el 5» sin mes" },
+  { gravedad: "menor", certeza: "baja", texto: "Doble espacio entre palabras" },
+];
+const ORDEN_NIVEL = { menor: 0, importante: 1, critica: 2, baja: 0, media: 1, alta: 2 };
+
+function renderEjemploParametro(id, valor) {
+  if (id === "gravedad_minima" || id === "certeza_minima") {
+    const campo = id === "gravedad_minima" ? "gravedad" : "certeza";
+    const filas = EJEMPLOS_HALLAZGOS.map((h) => {
+      const nivel = h[campo];
+      const conservado = ORDEN_NIVEL[nivel] >= valor;
+      const clase = campo === "gravedad" ? `badge-${nivel}` : CLASE_CERTEZA[nivel] || "";
+      const etiqueta = campo === "gravedad" ? nivel : ETIQUETA_CERTEZA[nivel] || nivel;
+      return `
+        <div class="ejemplo-fila${conservado ? "" : " ejemplo-descartado"}">
+          <span class="badge-gravedad ${clase}">${etiqueta}</span>
+          <span class="ejemplo-texto">${escapeHtml(h.texto)}</span>
+          <span class="ejemplo-veredicto">${conservado ? "se conserva" : "se descarta"}</span>
+        </div>`;
+    }).join("");
+    return `<div class="parametro-ejemplo">${filas}</div>`;
+  }
+
+  if (id === "umbral_norma_comillas") {
+    const proporcionEjemplo = 0.92;
+    const normaEstablecida = proporcionEjemplo >= valor;
+    return `
+      <div class="parametro-ejemplo">
+        <div class="ejemplo-fila">
+          <span class="ejemplo-texto">Ejemplo: el documento trae <mark>«comillas latinas»</mark> en el 92% de los casos y <mark>“comillas inglesas”</mark> en el 8%.</span>
+        </div>
+        <div class="ejemplo-fila">
+          <span class="ejemplo-veredicto">${
+            normaEstablecida
+              ? "Con este umbral, la norma queda establecida en «» → se descartan las quejas por comillas inglesas."
+              : "Con este umbral, 92% no alcanza a fijar la norma → las quejas de comillas sí se conservan."
+          }</span>
+        </div>
+      </div>`;
+  }
+
+  return "";
+}
+
 function renderParametrosFiltro(parametros) {
   const cont = document.getElementById("parametros-filtro");
   if (!parametros.length) { cont.innerHTML = ""; return; }
@@ -404,21 +460,27 @@ function renderParametrosFiltro(parametros) {
       const etiquetaValor = p.etiquetas_paso[p.valor] ?? p.etiquetas_paso[String(p.valor)] ?? p.valor;
       return `
       <div class="parametro-fila" data-id="${p.id}">
-        <div class="regla-texto">
-          <div class="regla-etiqueta">${escapeHtml(p.etiqueta)} — <span class="parametro-valor">${etiquetaValor}</span></div>
-          <div class="regla-descripcion">${escapeHtml(p.descripcion)}</div>
+        <div class="parametro-fila-controles">
+          <div class="regla-texto">
+            <div class="regla-etiqueta">${escapeHtml(p.etiqueta)} — <span class="parametro-valor">${etiquetaValor}</span></div>
+            <div class="regla-descripcion">${escapeHtml(p.descripcion)}</div>
+          </div>
+          <input type="range" min="${p.min}" max="${p.max}" step="${p.paso}" value="${p.valor}" data-id="${p.id}" />
         </div>
-        <input type="range" min="${p.min}" max="${p.max}" step="${p.paso}" value="${p.valor}" data-id="${p.id}" />
+        <div class="parametro-ejemplo-slot">${renderEjemploParametro(p.id, p.valor)}</div>
       </div>`;
     })
     .join("");
 
   cont.querySelectorAll("input[type=range]").forEach((input) => {
     const p = parametros.find((x) => x.id === input.dataset.id);
-    const etiquetaEl = input.closest(".parametro-fila").querySelector(".parametro-valor");
+    const fila = input.closest(".parametro-fila");
+    const etiquetaEl = fila.querySelector(".parametro-valor");
+    const slotEjemplo = fila.querySelector(".parametro-ejemplo-slot");
     input.addEventListener("input", () => {
       const v = Number(input.value);
       etiquetaEl.textContent = p.etiquetas_paso[v] ?? p.etiquetas_paso[String(v)] ?? v;
+      slotEjemplo.innerHTML = renderEjemploParametro(p.id, v);
     });
     input.addEventListener("change", async () => {
       await postJSON("/api/reglas_filtro", { [input.dataset.id]: Number(input.value) });

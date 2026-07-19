@@ -12,6 +12,7 @@ en varias sesiones de trabajo contra documentos reales.
 import csv
 import json
 import re
+import time
 import unicodedata
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
@@ -1229,14 +1230,7 @@ def extraer_urls_pdf(ruta_pdf: str) -> dict[str, list[int]]:
     return hallazgos
 
 
-def verificar_url(url: str, timeout: float = 6.0) -> dict:
-    """Comprueba si una URL responde. HEAD primero (más liviano); si el
-    servidor no lo soporta cae a GET. 401/403/429 se marcan como
-    'no_verificable' en vez de 'roto': muchos sitios académicos bloquean
-    peticiones automatizadas (o limitan la tasa) aunque el enlace funcione
-    perfectamente para un humano en el navegador — reportarlos como "roto"
-    sería un falso positivo tan malo como los que se filtraron hoy."""
-    headers = {"User-Agent": _USER_AGENT_NAVEGADOR}
+def _intentar_verificar_url(url: str, timeout: float, headers: dict) -> dict:
     try:
         r = requests.head(url, timeout=timeout, allow_redirects=True, headers=headers)
         if r.status_code in (405, 501):
@@ -1257,6 +1251,28 @@ def verificar_url(url: str, timeout: float = 6.0) -> dict:
         return {"url": url, "estado": "no_responde", "codigo": None}
     except requests.exceptions.RequestException as e:
         return {"url": url, "estado": "no_responde", "codigo": None, "detalle": str(e)[:200]}
+
+
+def verificar_url(url: str, timeout: float = 6.0) -> dict:
+    """Comprueba si una URL responde. HEAD primero (más liviano); si el
+    servidor no lo soporta cae a GET. 401/403/429 se marcan como
+    'no_verificable' en vez de 'roto': muchos sitios académicos bloquean
+    peticiones automatizadas (o limitan la tasa) aunque el enlace funcione
+    perfectamente para un humano en el navegador — reportarlos como "roto"
+    sería un falso positivo tan malo como los que se filtraron hoy.
+
+    'no_responde' (timeout, error de conexión, 5xx) se reintenta una vez
+    tras una breve espera antes de darlo por definitivo: un hipo de red o un
+    servidor momentáneamente ocupado no debería reportarse igual que un
+    enlace realmente caído. 'roto' (4xx real, p. ej. 404) y 'no_verificable'
+    no se reintentan — el servidor ya respondió algo concreto y reintentar no
+    va a cambiar esa respuesta."""
+    headers = {"User-Agent": _USER_AGENT_NAVEGADOR}
+    resultado = _intentar_verificar_url(url, timeout, headers)
+    if resultado["estado"] == "no_responde":
+        time.sleep(1.0)
+        resultado = _intentar_verificar_url(url, timeout, headers)
+    return resultado
 
 
 def verificar_urls(urls: list[str], max_hilos: int = 8, timeout: float = 6.0) -> list[dict]:

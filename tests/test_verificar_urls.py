@@ -12,7 +12,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import requests  # noqa: E402
 
+import motor  # noqa: E402
 from motor import extraer_urls_pdf, verificar_url, verificar_urls  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _sin_espera_real(monkeypatch):
+    """verificar_url reintenta 'no_responde' tras time.sleep(1.0) — sin este
+    parche cada test de esa rama tardaría un segundo real de reloj."""
+    monkeypatch.setattr(motor.time, "sleep", lambda segundos: None)
+
 
 # ── extraer_urls_pdf: pura, con un PDF sintético ────────────────────────────
 
@@ -91,9 +100,11 @@ def test_verificar_url_roto_404():
 
 
 def test_verificar_url_no_responde_error_5xx():
-    with patch("motor.requests.head", return_value=_RespuestaFalsa(503)):
+    with patch("motor.requests.head", return_value=_RespuestaFalsa(503)) as head_mock:
         r = verificar_url("https://ejemplo.com")
     assert r["estado"] == "no_responde"
+    # 'no_responde' persistente en ambos intentos: se reintentó una vez.
+    assert head_mock.call_count == 2
 
 
 def test_verificar_url_timeout():
@@ -101,6 +112,27 @@ def test_verificar_url_timeout():
         r = verificar_url("https://ejemplo.com")
     assert r["estado"] == "no_responde"
     assert r["codigo"] is None
+
+
+def test_verificar_url_no_responde_se_recupera_en_el_reintento():
+    # Hipo de red transitorio: el primer intento falla, el segundo responde
+    # 200 — el resultado final no debe reportarse como caído.
+    with patch(
+        "motor.requests.head",
+        side_effect=[requests.exceptions.Timeout(), _RespuestaFalsa(200)],
+    ) as head_mock:
+        r = verificar_url("https://ejemplo.com")
+    assert r["estado"] == "ok"
+    assert head_mock.call_count == 2
+
+
+@pytest.mark.parametrize("codigo", [404, 401, 403, 429])
+def test_verificar_url_roto_o_no_verificable_no_reintenta(codigo):
+    # 4xx es una respuesta definitiva del servidor -- reintentar no cambiaría
+    # nada, solo alargaría la verificación sin ganar precisión.
+    with patch("motor.requests.head", return_value=_RespuestaFalsa(codigo)) as head_mock:
+        verificar_url("https://ejemplo.com")
+    assert head_mock.call_count == 1
 
 
 def test_verificar_url_cae_a_get_si_head_no_soportado():

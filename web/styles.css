@@ -332,6 +332,9 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 .badge-critica { background: rgba(243, 139, 168, 0.18); color: var(--critica); }
 .badge-importante { background: rgba(250, 179, 135, 0.18); color: var(--importante); }
 .badge-menor { background: rgba(166, 227, 161, 0.18); color: var(--menor); }
+.badge-certeza-alta { background: rgba(137, 180, 250, 0.18); color: #89b4fa; }
+.badge-certeza-media { background: rgba(166, 173, 200, 0.15); color: #a6adc8; }
+.badge-certeza-baja { background: rgba(108, 112, 134, 0.18); color: #6c7086; }
 
 .conteo-hallazgos { color: var(--muted); font-size: 0.85rem; }
 .enlaces-resumen { color: var(--muted); font-size: 0.85rem; }
@@ -396,18 +399,39 @@ input:focus, select:focus { outline: none; border-color: var(--accent); }
 }
 .parametro-fila {
   display: flex;
-  align-items: center;
-  gap: 16px;
+  flex-direction: column;
+  gap: 10px;
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
 .parametro-fila:last-child { border-bottom: none; }
+.parametro-fila-controles { display: flex; align-items: center; gap: 16px; }
 .parametro-fila .regla-texto { flex: 1; }
 .parametro-valor { color: var(--accent); font-weight: 700; }
 .parametro-fila input[type="range"] {
   width: 180px;
   flex-shrink: 0;
   accent-color: var(--accent);
+}
+
+/* ejemplo visual en vivo bajo cada slider — ver el efecto del umbral sobre
+   un caso concreto, no solo el número */
+.parametro-ejemplo {
+  padding: 10px 12px;
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+}
+.ejemplo-fila { display: flex; align-items: center; gap: 10px; padding: 3px 0; }
+.ejemplo-fila.ejemplo-descartado { opacity: 0.4; }
+.ejemplo-fila.ejemplo-descartado .ejemplo-texto { text-decoration: line-through; }
+.ejemplo-texto { flex: 1; color: var(--text); }
+.ejemplo-veredicto { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+.parametro-ejemplo mark {
+  background: rgba(203, 166, 247, 0.25);
+  color: var(--accent);
+  padding: 0 2px;
+  border-radius: 3px;
 }
 
 /* ── entregables ─────────────────────────────────────────────────────── */

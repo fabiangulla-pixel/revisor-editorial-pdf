@@ -28,6 +28,7 @@ except OSError:
 
 from motor import (  # noqa: E402
     ASUNTOS,
+    PARAMETROS_FILTRO,
     REGLAS_FILTRO,
     AnalizadorPDF,
     ClaudeProveedor,
@@ -228,6 +229,14 @@ class AppCorrector(tk.Tk):
         self.config_filtro: dict[str, tk.BooleanVar] = {
             regla_id: tk.BooleanVar(value=True) for regla_id, _, _, _ in REGLAS_FILTRO
         }
+        # Un DoubleVar por parámetro numérico de PARAMETROS_FILTRO (gravedad/
+        # certeza mínima, sensibilidad de norma de comillas) — comparten el
+        # mismo config_filtro.json que las reglas booleanas (ver
+        # _cargar_config_filtro/_guardar_config_filtro), igual que en la web.
+        self.config_parametros: dict[str, tk.DoubleVar] = {
+            param_id: tk.DoubleVar(value=default)
+            for param_id, _, _, _minv, _maxv, _paso, default, _etq in PARAMETROS_FILTRO
+        }
         self.motor = MotorRevision(log_callback=self._log)
 
         # Estado de los chips de filtro de la pestaña "Hallazgos" — qué
@@ -264,9 +273,13 @@ class AppCorrector(tk.Tk):
         for regla_id, activa in guardado.items():
             if regla_id in self.config_filtro:
                 self.config_filtro[regla_id].set(bool(activa))
+        for param_id, valor in guardado.items():
+            if param_id in self.config_parametros:
+                self.config_parametros[param_id].set(float(valor))
 
     def _guardar_config_filtro(self):
         datos = {regla_id: var.get() for regla_id, var in self.config_filtro.items()}
+        datos.update({param_id: var.get() for param_id, var in self.config_parametros.items()})
         ruta = self._ruta_config_filtro()
         try:
             ruta.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -279,6 +292,8 @@ class AppCorrector(tk.Tk):
     def _restablecer_config_filtro(self):
         for var in self.config_filtro.values():
             var.set(True)
+        for param_id, _, _, _minv, _maxv, _paso, default, _etq in PARAMETROS_FILTRO:
+            self.config_parametros[param_id].set(default)
 
     def _cargar_perfil_gulla_automatico(self):
         """Carga el perfil de FAGV automáticamente si existe."""
@@ -609,6 +624,25 @@ class AppCorrector(tk.Tk):
     # ── TAB HALLAZGOS ─────────────────────────────────────────────────────────
 
     COLORES_GRAVEDAD = {"critica": "#f38ba8", "importante": "#fab387", "menor": "#a6e3a1"}
+    COLORES_CERTEZA = {"alta": "#89b4fa", "media": "#a6adc8", "baja": "#6c7086"}
+    ETIQUETAS_CERTEZA = {"alta": "CERTEZA ALTA", "media": "CERTEZA MEDIA", "baja": "CERTEZA BAJA"}
+    # Ejemplos fijos para mostrar en vivo el efecto de cada slider de
+    # PARAMETROS_FILTRO sobre casos concretos — mismo patrón que la web
+    # (ver renderEjemploParametro en web/app.js), imitando cómo Errata
+    # ilustra cada control con un caso de ejemplo en vez de dejarlo abstracto.
+    EJEMPLOS_HALLAZGOS_PARAMETRO = [
+        ("critica", "alta", "«Kant» escrito «Khant»"),
+        ("importante", "media", "Posible ambigüedad de fecha: «el 5» sin mes"),
+        ("menor", "baja", "Doble espacio entre palabras"),
+    ]
+    ORDEN_NIVEL_PARAMETRO = {
+        "menor": 0,
+        "importante": 1,
+        "critica": 2,
+        "baja": 0,
+        "media": 1,
+        "alta": 2,
+    }
     COLORES_CATEGORIA = {
         "ortotipografia": "#f38ba8",
         "composicion_tipografica": "#fab387",
@@ -645,11 +679,21 @@ class AppCorrector(tk.Tk):
         self.mapa_hallazgos.bind("<Button-1>", self._clic_mapa_hallazgos)
         self.mapa_hallazgos.bind("<Configure>", lambda e: self._redibujar_mapa_hallazgos())
 
-        cols = ("pagina", "gravedad", "categoria", "tipo", "descripcion", "fragmento", "correccion")
+        cols = (
+            "pagina",
+            "gravedad",
+            "certeza",
+            "categoria",
+            "tipo",
+            "descripcion",
+            "fragmento",
+            "correccion",
+        )
         self.tree = ttk.Treeview(cuerpo, columns=cols, show="headings", selectmode="extended")
         anchos = {
             "pagina": 55,
             "gravedad": 85,
+            "certeza": 80,
             "categoria": 130,
             "tipo": 120,
             "descripcion": 240,
@@ -659,6 +703,7 @@ class AppCorrector(tk.Tk):
         labels = {
             "pagina": "Pág.",
             "gravedad": "Gravedad",
+            "certeza": "Certeza",
             "categoria": "Categoría",
             "tipo": "Tipo",
             "descripcion": "Descripción",
@@ -739,6 +784,9 @@ class AppCorrector(tk.Tk):
 
         interior = self._frame_desplazable(parent)
 
+        self._filas_ejemplo_parametro: dict[str, object] = {}
+        self._construir_tarjeta_parametros(interior)
+
         grupos: dict[str, list[tuple[str, str, str]]] = {}
         for regla_id, grupo, etiqueta, descripcion in REGLAS_FILTRO:
             grupos.setdefault(grupo, []).append((regla_id, etiqueta, descripcion))
@@ -801,6 +849,156 @@ class AppCorrector(tk.Tk):
                 ).pack(fill="x", pady=(2, 0))
 
             tk.Frame(tarjeta, bg="#252537", height=6).pack(fill="x")
+
+    def _construir_tarjeta_parametros(self, interior):
+        """Tarjeta 'Parámetros': un ttk.Scale por PARAMETROS_FILTRO, con un
+        ejemplo visual que se recalcula en vivo al mover el slider — paridad
+        con la web (ver renderParametrosFiltro/renderEjemploParametro)."""
+        tarjeta = tk.Frame(interior, bg="#252537")
+        tarjeta.pack(fill="x", padx=16, pady=8)
+
+        cab = tk.Frame(tarjeta, bg="#252537")
+        cab.pack(fill="x", padx=14, pady=(12, 6))
+        tk.Label(
+            cab, text="Parámetros", bg="#252537", fg="#cba6f7", font=("Segoe UI", 11, "bold")
+        ).pack(side="left")
+
+        for (
+            param_id,
+            etiqueta,
+            descripcion,
+            minv,
+            maxv,
+            paso,
+            _default,
+            etiquetas_paso,
+        ) in PARAMETROS_FILTRO:
+            fila = tk.Frame(tarjeta, bg="#252537")
+            fila.pack(fill="x", padx=14, pady=6)
+
+            encabezado = tk.Frame(fila, bg="#252537")
+            encabezado.pack(fill="x")
+            tk.Label(
+                encabezado,
+                text=etiqueta,
+                bg="#252537",
+                fg="#cdd6f4",
+                font=("Segoe UI", 10),
+                anchor="w",
+            ).pack(side="left")
+            lbl_valor = tk.Label(
+                encabezado, text="", bg="#252537", fg="#cba6f7", font=("Segoe UI", 10, "bold")
+            )
+            lbl_valor.pack(side="left", padx=(6, 0))
+
+            ttk.Scale(
+                encabezado,
+                from_=minv,
+                to=maxv,
+                orient="horizontal",
+                length=180,
+                variable=self.config_parametros[param_id],
+                command=lambda v, pid=param_id, etq=etiquetas_paso, p=paso, lbl=lbl_valor: (
+                    self._on_cambiar_parametro(pid, v, etq, p, lbl)
+                ),
+            ).pack(side="right")
+
+            tk.Label(
+                fila,
+                text=descripcion,
+                bg="#252537",
+                fg="#6c7086",
+                font=("Segoe UI", 8),
+                wraplength=680,
+                justify="left",
+                anchor="w",
+            ).pack(fill="x", pady=(2, 0))
+
+            ejemplo = tk.Frame(fila, bg="#1e1e2e")
+            ejemplo.pack(fill="x", pady=(6, 0))
+            self._construir_ejemplo_parametro(ejemplo, param_id)
+            # Valor actual (puede venir de config_filtro.json ya cargado en
+            # __init__), no el default estático — si no, esto pisaría un
+            # ajuste guardado con el valor de fábrica cada vez que se abre.
+            self._on_cambiar_parametro(
+                param_id, self.config_parametros[param_id].get(), etiquetas_paso, paso, lbl_valor
+            )
+
+        tk.Frame(tarjeta, bg="#252537", height=6).pack(fill="x")
+
+    def _construir_ejemplo_parametro(self, contenedor, param_id):
+        if param_id in ("gravedad_minima", "certeza_minima"):
+            campo_gravedad = param_id == "gravedad_minima"
+            filas_widgets = []
+            for grav, certeza, texto in self.EJEMPLOS_HALLAZGOS_PARAMETRO:
+                nivel = grav if campo_gravedad else certeza
+                fila = tk.Frame(contenedor, bg="#1e1e2e")
+                fila.pack(fill="x", padx=10, pady=3)
+                color = (self.COLORES_GRAVEDAD if campo_gravedad else self.COLORES_CERTEZA)[nivel]
+                etiqueta_badge = nivel.upper() if campo_gravedad else self.ETIQUETAS_CERTEZA[nivel]
+                tk.Label(
+                    fila, text=etiqueta_badge, bg="#1e1e2e", fg=color, font=("Segoe UI", 8, "bold")
+                ).pack(side="left")
+                lbl_texto = tk.Label(
+                    fila, text=texto, bg="#1e1e2e", fg="#cdd6f4", font=("Segoe UI", 8)
+                )
+                lbl_texto.pack(side="left", padx=(8, 0))
+                lbl_veredicto = tk.Label(
+                    fila, text="", bg="#1e1e2e", fg="#6c7086", font=("Segoe UI", 8)
+                )
+                lbl_veredicto.pack(side="right")
+                filas_widgets.append((nivel, lbl_texto, lbl_veredicto))
+            self._filas_ejemplo_parametro[param_id] = filas_widgets
+        elif param_id == "umbral_norma_comillas":
+            lbl = tk.Label(
+                contenedor,
+                text="",
+                bg="#1e1e2e",
+                fg="#cdd6f4",
+                font=("Segoe UI", 8),
+                wraplength=680,
+                justify="left",
+                anchor="w",
+            )
+            lbl.pack(fill="x", padx=10, pady=4)
+            self._filas_ejemplo_parametro[param_id] = lbl
+
+    def _actualizar_ejemplo_parametro(self, param_id, valor):
+        widgets = self._filas_ejemplo_parametro.get(param_id)
+        if widgets is None:
+            return
+        if param_id in ("gravedad_minima", "certeza_minima"):
+            for nivel, lbl_texto, lbl_veredicto in widgets:
+                conservado = self.ORDEN_NIVEL_PARAMETRO[nivel] >= valor
+                lbl_veredicto.configure(text="se conserva" if conservado else "se descarta")
+                lbl_texto.configure(fg="#cdd6f4" if conservado else "#4a4a5e")
+        elif param_id == "umbral_norma_comillas":
+            proporcion_ejemplo = 0.92
+            establecida = proporcion_ejemplo >= valor
+            veredicto = (
+                "Con este umbral, la norma queda establecida en «» → se descartan las "
+                "quejas por comillas inglesas."
+                if establecida
+                else "Con este umbral, 92% no alcanza a fijar la norma → las quejas de "
+                "comillas sí se conservan."
+            )
+            widgets.configure(
+                text="Ejemplo: el documento trae «comillas latinas» en el 92% de los "
+                "casos y “comillas inglesas” en el 8%. " + veredicto
+            )
+
+    @staticmethod
+    def _snap_valor(valor: float, paso: float) -> float:
+        return round(round(valor / paso) * paso, 4)
+
+    def _on_cambiar_parametro(self, param_id, valor_bruto, etiquetas_paso, paso, lbl_valor):
+        v = self._snap_valor(float(valor_bruto), paso)
+        self.config_parametros[param_id].set(v)
+        etiqueta_valor = etiquetas_paso.get(v)
+        if etiqueta_valor is None:
+            etiqueta_valor = f"{v:g}"
+        lbl_valor.configure(text=f"— {etiqueta_valor}")
+        self._actualizar_ejemplo_parametro(param_id, v)
 
     def _reaplicar_filtro_documental(self):
         """Vuelve a correr _filtrar_falsos_positivos sobre los hallazgos crudos
@@ -1091,9 +1289,11 @@ class AppCorrector(tk.Tk):
         hilo.start()
 
     def _sincronizar_config_motor(self):
-        """Copia el estado actual de los BooleanVar de la GUI (config_filtro)
-        al dict plano que usa MotorRevision, justo antes de filtrar."""
+        """Copia el estado actual de los BooleanVar/DoubleVar de la GUI
+        (config_filtro/config_parametros) al dict plano que usa MotorRevision,
+        justo antes de filtrar."""
         self.motor.config_filtro = {k: v.get() for k, v in self.config_filtro.items()}
+        self.motor.config_filtro.update({k: v.get() for k, v in self.config_parametros.items()})
 
     def _proceso_revision(self, ruta: str, sistema: str):
         try:
@@ -1282,6 +1482,7 @@ class AppCorrector(tk.Tk):
                 values=(
                     h.get("pagina", ""),
                     grav,
+                    h.get("certeza", ""),
                     h.get("categoria", "").replace("_", " "),
                     h.get("tipo_anotacion", "").replace("_", " "),
                     h.get("descripcion", "")[:80],

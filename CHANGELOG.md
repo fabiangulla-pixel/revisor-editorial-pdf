@@ -1,5 +1,63 @@
 # CHANGELOG — RevisorEditorialPDF
 
+## 2026-07-19
+
+### Certeza visible + reintento de red + paridad de escritorio
+
+- **Certeza del hallazgo visible en la UI** (web y escritorio): el modelo ya
+  declaraba `certeza` (baja/media/alta) por hallazgo y se usaba internamente
+  para filtrar, pero se descartaba después sin mostrarse — un hallazgo de
+  certeza baja que sobrevivía al filtro se veía igual de confiable que uno de
+  certeza alta. Ahora es una columna/badge más, junto a Gravedad.
+- **`verificar_url` reintenta una vez** los casos `no_responde` (timeout,
+  error de conexión, 5xx) tras una breve espera antes de darlos por
+  definitivos — un hipo de red transitorio no debe reportarse igual que un
+  enlace realmente caído. `roto` (4xx real) y `no_verificable` (401/403/429)
+  no se reintentan: el servidor ya respondió algo concreto.
+- **Ejemplo visual en vivo bajo cada slider de "Ajustes de filtrado"** (web y
+  escritorio): mover el slider de gravedad/certeza mínima o de sensibilidad de
+  comillas ahora recalcula al instante, sobre un caso de ejemplo fijo, cuáles
+  se conservarían y cuáles se descartarían — en vez de dejar el umbral como un
+  número abstracto (patrón tomado de cómo Errata ilustra sus propios controles).
+- **Paridad de escritorio cerrada**: los 3 parámetros numéricos de
+  `PARAMETROS_FILTRO` (gravedad mínima, certeza mínima, sensibilidad de norma
+  de comillas) solo existían como sliders en la web desde el 16-jul; ahora
+  `corrector_editorial.py` los expone también, con el mismo ejemplo visual,
+  compartiendo el mismo `config_filtro.json`.
+- Investigación de proyectos open-source afines (AnnotateAI, RefChecker,
+  redlines, dehyphen, Vale/hank) para contrastar el enfoque propio: confirmó
+  que la arquitectura de doble interfaz sobre `http.server` sin framework es
+  poco común (diferenciador, no hueco), y que las anotaciones nativas de PDF
+  multiproveedor ya son el patrón adoptado por proyectos maduros del mismo
+  espacio.
+
+## 2026-07-17
+
+### Despliegue público en Render: sesiones aisladas por cookie + login
+
+`servidor_web.py` gana un modo dual sin tocar el comportamiento local
+existente: sin la variable de entorno `REVISOR_PASSWORD`, todo sigue igual
+(un único `ESTADO` de proceso, sin login). Con esa variable presente
+(`MODO_PUBLICO`), se activa: login con contraseña compartida, una
+`EstadoServidor` por sesión de cookie (aislamiento total entre visitantes),
+sin persistir API keys ni ajustes de filtro a disco compartido, sin Ollama en
+el catálogo de proveedores (no hay modelo local en un servidor remoto), y
+barrido automático de sesiones inactivas (>6h).
+
+- Bug real encontrado y corregido en pruebas: la cookie de sesión llevaba el
+  flag `Secure` incondicional, que un navegador nunca reenvía sobre HTTP
+  plano — el login "funcionaba" (200) pero la sesión se perdía en la
+  siguiente petición. Ahora `Secure` solo se agrega si la petición llega
+  detrás de un proxy HTTPS (`X-Forwarded-Proto`), como sirve Render en
+  producción.
+- Verificado con un `ThreadingHTTPServer` real en pytest (loopback, sin red
+  externa) y con dos perfiles de navegador por CDP: aislamiento confirmado,
+  cero escritura a `config_filtro.json`/`.env` compartidos.
+- `render.yaml` + sección "Desplegar en Render" en el README.
+- Skill `/NativoWeb` creado a partir de este trabajo, generalizando el patrón
+  (desktop→web, modo público multi-sesión) para aplicarlo a otros proyectos
+  de escritorio del usuario.
+
 ## 2026-07-16
 
 ### Interfaz web local (servidor stdlib + HTML/CSS/JS)
