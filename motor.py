@@ -709,6 +709,11 @@ class AnalizadorPDF:
             "tiene_texto": bool(texto_partes),
         }
 
+    def extraer_lineas(self, indice: int) -> list[dict]:
+        """Texto y bbox por línea tipográfica de la página `indice` — usado
+        por detectar_repeticion_lineas_consecutivas. Ver _extraer_lineas_pagina."""
+        return _extraer_lineas_pagina(self.doc[indice])
+
     def construir_prompt(self, datos: dict, total_paginas: int = 0) -> str:
         partes = []
         fuente_actual = None
@@ -763,6 +768,9 @@ ASUNTOS = {
     "diagramacion": "Diagramación",
     "imagenes_tablas": "Imágenes/Tablas",
     "preliminares_finales": "Preliminares/Finales",
+    # No la emite el LLM: la producen los detectores deterministas de abajo
+    # (detectar_palabras_repetidas y compañía), no el prompt SISTEMA_BASE.
+    "repeticion_lexica": "Repetición léxica",
 }
 
 # Registro de reglas del filtro de falsos positivos, como datos puros (id,
@@ -911,6 +919,27 @@ REGLAS_FILTRO: list[tuple[str, str, str, str]] = [
         "El modelo se autodescarta",
         "El propio modelo dice «no marcar» / «no reportar» / «descartar si no hay error».",
     ),
+    # A diferencia de los grupos de arriba (descartan hallazgos del LLM), este
+    # grupo ACTIVA detectores deterministas propios que corren sobre el texto
+    # extraído, en paralelo al LLM — ver detectar_palabras_repetidas y
+    # compañía. Reutiliza el mismo mecanismo de toggle (activo=True) con
+    # sentido inverso: aquí "activo" significa "el detector corre", no
+    # "se descarta lo que encuentre".
+    (
+        "deteccion_palabra_repetida",
+        "Detección adicional (más allá del LLM)",
+        "Palabra entera repetida",
+        "Detecta la misma palabra reaparecer cerca (ver «Letras que deben coincidir» "
+        "para la variante de raíz). No pasa por el LLM: es un chequeo de patrón directo "
+        "sobre el texto extraído.",
+    ),
+    (
+        "deteccion_cortes_malsonantes",
+        "Detección adicional (más allá del LLM)",
+        "Cortes malsonantes",
+        "Avisa si un guion de fin de línea deja un fragmento que coincide con tu lista "
+        "de «Fragmentos a vigilar», abajo. Vacía por defecto — la completas tú.",
+    ),
 ]
 
 # Parámetros numéricos del filtro (id, etiqueta, descripción, min, max, paso,
@@ -949,6 +978,39 @@ PARAMETROS_FILTRO: list[tuple[str, str, str, float, float, float, float, dict]] 
         1.0,
         0.05,
         0.9,
+        {},
+    ),
+    (
+        "letras_coincidentes_min",
+        "Letras que deben coincidir",
+        "Mínimo de letras iniciales compartidas entre dos palabras distintas para "
+        "considerarlas raíz repetida (p. ej. «construir»/«constante» con 5).",
+        3,
+        10,
+        1,
+        5,
+        {},
+    ),
+    (
+        "renglones_seguidos_min",
+        "Renglones seguidos",
+        "Mínimo de renglones consecutivos con la misma palabra para marcar efecto eco/cascada.",
+        2,
+        5,
+        1,
+        2,
+        {},
+    ),
+    (
+        "inclinacion_maxima_pt",
+        "Inclinación máxima permitida",
+        "Tolerancia (en puntos) de desnivel de línea base entre renglones para "
+        "seguir considerándolos consecutivos — más allá de esto, se trata como "
+        "salto de columna y no cuenta para «Renglones seguidos».",
+        0,
+        15,
+        0.5,
+        4.5,
         {},
     ),
 ]
@@ -1285,6 +1347,276 @@ def verificar_urls(urls: list[str], max_hilos: int = 8, timeout: float = 6.0) ->
     return resultados
 
 
+# ── Detectores deterministas de repetición (no pasan por el LLM) ────────────
+# Errata trae estas 4 reglas como chequeos de patrón independientes del LLM,
+# cada una con su propio umbral configurable. Se ejecutan sobre el texto/las
+# líneas ya extraídas de cada página, en paralelo a la revisión del LLM, y sus
+# hallazgos se suman a los de este antes del filtro documental — comparten
+# exactamente el mismo formato de hallazgo (pagina/categoria/gravedad/
+# certeza/descripcion/correccion/fragmento) para fluir por el resto del
+# pipeline (filtro, anotación, bbox) sin ningún caso especial.
+
+_PALABRAS_VACIAS_ES = {
+    "el",
+    "la",
+    "los",
+    "las",
+    "un",
+    "una",
+    "unos",
+    "unas",
+    "de",
+    "del",
+    "al",
+    "a",
+    "en",
+    "por",
+    "para",
+    "con",
+    "sin",
+    "sobre",
+    "entre",
+    "y",
+    "o",
+    "u",
+    "e",
+    "que",
+    "se",
+    "su",
+    "sus",
+    "lo",
+    "le",
+    "les",
+    "es",
+    "son",
+    "fue",
+    "ser",
+    "estar",
+    "esta",
+    "este",
+    "estos",
+    "estas",
+    "como",
+    "más",
+    "pero",
+    "no",
+    "ni",
+    "si",
+    "también",
+    "muy",
+    "ya",
+    "cuando",
+    "donde",
+    "porque",
+}
+_RE_PALABRA = re.compile(r"[a-záéíóúüñA-ZÁÉÍÓÚÜÑ]+")
+
+
+def _contexto_palabra(palabras: list[str], idx: int, radio: int = 2) -> str:
+    """Ventana de palabras alrededor de `idx`, para usar como `fragmento`:
+    más probable que sea único en la página que la palabra suelta (search_for
+    toma la primera coincidencia — un contexto más largo reduce el riesgo de
+    resaltar la ocurrencia equivocada cuando la palabra se repite varias veces)."""
+    ini = max(0, idx - radio)
+    fin = min(len(palabras), idx + radio + 1)
+    return " ".join(palabras[ini:fin])
+
+
+def detectar_palabras_repetidas(texto: str, pagina: int, ventana_palabras: int = 30) -> list[dict]:
+    """«Palabra entera repetida»: la misma palabra (≥4 letras, no vacía)
+    reaparece dentro de una ventana de N palabras — repetición cercana que
+    suena reiterativa, defecto de estilo clásico en corrección de pruebas."""
+    palabras = _RE_PALABRA.findall(texto)
+    ultima_aparicion: dict[str, int] = {}
+    hallazgos = []
+    for i, palabra in enumerate(palabras):
+        clave = palabra.lower()
+        if len(clave) < 4 or clave in _PALABRAS_VACIAS_ES:
+            continue
+        anterior = ultima_aparicion.get(clave)
+        if anterior is not None and (i - anterior) <= ventana_palabras:
+            hallazgos.append(
+                {
+                    "pagina": pagina,
+                    "categoria": "repeticion_lexica",
+                    "gravedad": "menor",
+                    "certeza": "alta",
+                    "descripcion": (
+                        f"Palabra repetida: «{palabra}» ya había aparecido "
+                        f"{i - anterior} palabras antes."
+                    ),
+                    "correccion": f"Repetición cercana de «{palabra}» — considera variar o eliminar una.",
+                    "fragmento": _contexto_palabra(palabras, i),
+                }
+            )
+        ultima_aparicion[clave] = i
+    return hallazgos
+
+
+def detectar_raices_repetidas(
+    texto: str, pagina: int, letras_min: int, ventana_palabras: int = 30
+) -> list[dict]:
+    """«Letras que deben coincidir»: dos palabras DISTINTAS que comparten un
+    prefijo de al menos `letras_min` letras dentro de la misma ventana
+    («construir»/«constante») — repetición de raíz, más sutil que la palabra
+    exacta (que ya cubre detectar_palabras_repetidas)."""
+    palabras = _RE_PALABRA.findall(texto)
+    ultima_por_prefijo: dict[str, tuple[int, str]] = {}
+    hallazgos = []
+    for i, palabra in enumerate(palabras):
+        clave = palabra.lower()
+        if len(clave) < letras_min or clave in _PALABRAS_VACIAS_ES:
+            continue
+        prefijo = clave[:letras_min]
+        anterior = ultima_por_prefijo.get(prefijo)
+        if anterior is not None:
+            idx_anterior, palabra_anterior = anterior
+            if (i - idx_anterior) <= ventana_palabras and clave != palabra_anterior.lower():
+                hallazgos.append(
+                    {
+                        "pagina": pagina,
+                        "categoria": "repeticion_lexica",
+                        "gravedad": "menor",
+                        "certeza": "alta",
+                        "descripcion": (
+                            f"Raíz repetida: «{palabra}» comparte «{prefijo}» con "
+                            f"«{palabra_anterior}», {i - idx_anterior} palabras antes."
+                        ),
+                        "correccion": (
+                            f"«{palabra}» y «{palabra_anterior}» suenan parecido tan cerca "
+                            "— revisa si conviene variar alguna."
+                        ),
+                        "fragmento": _contexto_palabra(palabras, i),
+                    }
+                )
+        ultima_por_prefijo[prefijo] = (i, palabra)
+    return hallazgos
+
+
+def _extraer_lineas_pagina(pagina) -> list[dict]:
+    """Texto y bbox por LÍNEA tipográfica (no por span) — a diferencia de
+    AnalizadorPDF.extraer_pagina (que trabaja a nivel de span para preservar
+    negrita/cursiva), detectar_repeticion_lineas_consecutivas necesita saber
+    qué texto cae en cada renglón real y su posición vertical."""
+    lineas = []
+    raw = pagina.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)
+    for bloque in raw.get("blocks", []):
+        if bloque.get("type") != 0:
+            continue
+        for linea in bloque.get("lines", []):
+            texto = "".join(s.get("text", "") for s in linea.get("spans", []))
+            if not texto.strip():
+                continue
+            lineas.append({"texto": texto, "bbox": list(linea["bbox"])})
+    return lineas
+
+
+def detectar_repeticion_lineas_consecutivas(
+    lineas: list[dict], pagina: int, renglones_min: int, inclinacion_max_pt: float
+) -> list[dict]:
+    """«Renglones seguidos»: la misma palabra aparece en `renglones_min` o más
+    renglones visualmente consecutivos (defecto tipográfico de "eco" o
+    "cascada"). `inclinacion_max_pt` filtra falsos "consecutivos": si el salto
+    de línea base entre dos renglones se desvía más de esa tolerancia (en pt)
+    del salto típico de la página, no se consideran renglones realmente
+    contiguos (p. ej. un salto de columna leído como línea siguiente)."""
+    if len(lineas) < renglones_min:
+        return []
+
+    saltos = [lineas[i + 1]["bbox"][3] - lineas[i]["bbox"][3] for i in range(len(lineas) - 1)]
+    saltos_positivos = [s for s in saltos if s > 0]
+    if not saltos_positivos:
+        return []
+    # El salto MÍNIMO observado, no la mediana: el interlineado real de un
+    # bloque de texto es uniforme y es, por construcción, el salto más chico
+    # de la página; saltos de columna/párrafo son siempre mayores. Con pocas
+    # líneas por página, una mediana se deja arrastrar por el propio salto
+    # atípico que se quiere excluir (con solo 2 saltos, la "mediana" cae en
+    # el mayor de los dos, justo el caso que hay que detectar como outlier).
+    salto_tipico = min(saltos_positivos)
+
+    # Agrupa líneas realmente consecutivas (salto ≈ salto_tipico) en rachas.
+    rachas: list[list[dict]] = [[lineas[0]]]
+    for i in range(1, len(lineas)):
+        salto = lineas[i]["bbox"][3] - lineas[i - 1]["bbox"][3]
+        if abs(salto - salto_tipico) <= inclinacion_max_pt:
+            rachas[-1].append(lineas[i])
+        else:
+            rachas.append([lineas[i]])
+
+    hallazgos = []
+    for racha in rachas:
+        if len(racha) < renglones_min:
+            continue
+        palabras_por_linea = [
+            {w.lower() for w in _RE_PALABRA.findall(ln["texto"]) if len(w) >= 4} for ln in racha
+        ]
+        # Ventana deslizante de tamaño renglones_min dentro de la racha: una
+        # racha larga no exige que la palabra esté en TODAS sus líneas, solo
+        # en renglones_min consecutivos dentro de ella.
+        ya_reportadas: set = set()
+        for inicio in range(len(racha) - renglones_min + 1):
+            ventana = palabras_por_linea[inicio : inicio + renglones_min]
+            comunes = set.intersection(*ventana) - _PALABRAS_VACIAS_ES - ya_reportadas
+            for palabra in comunes:
+                hallazgos.append(
+                    {
+                        "pagina": pagina,
+                        "categoria": "repeticion_lexica",
+                        "gravedad": "menor",
+                        "certeza": "alta",
+                        "descripcion": (
+                            f"«{palabra}» se repite en {renglones_min} renglones seguidos "
+                            "(efecto eco/cascada)."
+                        ),
+                        "correccion": (
+                            f"Repetición de «{palabra}» en renglones consecutivos — valorar reescribir."
+                        ),
+                        "fragmento": racha[inicio]["texto"].strip(),
+                    }
+                )
+                ya_reportadas.add(palabra)
+    return hallazgos
+
+
+_RE_CORTE_LINEA = re.compile(r"\b([a-záéíóúüñA-ZÁÉÍÓÚÜÑ]{2,})-\s+([a-záéíóúüñ]{2,})\b")
+
+
+def detectar_cortes_malsonantes(
+    texto: str, pagina: int, fragmentos_vigilar: list[str]
+) -> list[dict]:
+    """«Cortes malsonantes»: un guion de fin de línea deja, antes del corte,
+    un fragmento que coincide con la lista de vigilancia del usuario (p. ej.
+    fragmentos que solos podrían leerse mal o resultar embarazosos). Lista
+    vacía por defecto — es deliberadamente el usuario quien la puebla, no un
+    diccionario incluido en el código."""
+    if not fragmentos_vigilar:
+        return []
+    vigilar_normalizado = {f.strip().lower() for f in fragmentos_vigilar if f.strip()}
+    if not vigilar_normalizado:
+        return []
+
+    hallazgos = []
+    for m in _RE_CORTE_LINEA.finditer(texto):
+        parte1 = m.group(1)
+        if parte1.lower() in vigilar_normalizado:
+            hallazgos.append(
+                {
+                    "pagina": pagina,
+                    "categoria": "repeticion_lexica",
+                    "gravedad": "importante",
+                    "certeza": "alta",
+                    "descripcion": (
+                        f"Corte de línea deja «{parte1}-» suelto — coincide con la lista "
+                        "de fragmentos a vigilar."
+                    ),
+                    "correccion": "Revisar que el corte de línea no quede embarazoso en la maqueta.",
+                    "fragmento": m.group(0),
+                }
+            )
+    return hallazgos
+
+
 def generar_informes(
     hallazgos: list,
     nombre_pdf: str,
@@ -1443,6 +1775,35 @@ class MotorRevision:
         PARAMETROS_FILTRO), o su default si no está en config_filtro."""
         default = next(p[6] for p in PARAMETROS_FILTRO if p[0] == param_id)
         return self.config_filtro.get(param_id, default)
+
+    def detectar_reglas_deterministas(self, texto: str, lineas: list[dict], pagina: int) -> list:
+        """Corre los 4 detectores de patrón (no-LLM) sobre una página según
+        los toggles/parámetros activos, y devuelve sus hallazgos en el mismo
+        formato que produce el LLM — para sumarse a hall_pag antes del filtro
+        documental. Ver el grupo "Detección adicional" de REGLAS_FILTRO."""
+        hallazgos: list = []
+
+        if self._regla_activa("deteccion_palabra_repetida"):
+            hallazgos.extend(detectar_palabras_repetidas(texto, pagina))
+            hallazgos.extend(
+                detectar_raices_repetidas(
+                    texto, pagina, int(self._parametro("letras_coincidentes_min"))
+                )
+            )
+            hallazgos.extend(
+                detectar_repeticion_lineas_consecutivas(
+                    lineas,
+                    pagina,
+                    int(self._parametro("renglones_seguidos_min")),
+                    self._parametro("inclinacion_maxima_pt"),
+                )
+            )
+
+        if self._regla_activa("deteccion_cortes_malsonantes"):
+            fragmentos_vigilar = self.config_filtro.get("fragmentos_malsonantes_vigilar", [])
+            hallazgos.extend(detectar_cortes_malsonantes(texto, pagina, fragmentos_vigilar))
+
+        return hallazgos
 
     def _filtrar_particiones(self, hallazgos: list) -> list:
         """Descarta hallazgos de partición de palabras que son artefactos de PyMuPDF.

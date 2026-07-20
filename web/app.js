@@ -449,6 +449,58 @@ function renderEjemploParametro(id, valor) {
       </div>`;
   }
 
+  if (id === "letras_coincidentes_min") {
+    const n = Math.round(valor);
+    const marcar = (palabra) =>
+      palabra.length >= n
+        ? `<mark>${escapeHtml(palabra.slice(0, n))}</mark>${escapeHtml(palabra.slice(n))}`
+        : escapeHtml(palabra);
+    const comparten = "construir".slice(0, n).toLowerCase() === "constante".slice(0, n).toLowerCase();
+    return `
+      <div class="parametro-ejemplo">
+        <div class="ejemplo-fila">
+          <span class="ejemplo-texto">${marcar("construir")} / ${marcar("constante")}</span>
+          <span class="ejemplo-veredicto">${comparten ? "se marca (raíz repetida)" : "no se marca"}</span>
+        </div>
+        <div class="ejemplo-fila">
+          <span class="ejemplo-texto">${escapeHtml("canción")} / ${escapeHtml("atención")}</span>
+          <span class="ejemplo-veredicto">no se marca</span>
+        </div>
+      </div>`;
+  }
+
+  if (id === "renglones_seguidos_min") {
+    const n = Math.round(valor);
+    const filas = Array.from({ length: n }, () => "…un largo <mark>callejón</mark> oscuro…")
+      .map((linea) => `<div class="ejemplo-fila"><span class="ejemplo-texto">${linea}</span></div>`)
+      .join("");
+    return `
+      <div class="parametro-ejemplo">
+        ${filas}
+        <div class="ejemplo-fila">
+          <span class="ejemplo-veredicto">${n} renglones seguidos con «callejón» → se marca efecto eco/cascada.</span>
+        </div>
+      </div>`;
+  }
+
+  if (id === "inclinacion_maxima_pt") {
+    const desnivelEjemplo = 3.0;
+    const cuentaComoConsecutivo = desnivelEjemplo <= valor;
+    return `
+      <div class="parametro-ejemplo">
+        <div class="ejemplo-fila">
+          <span class="ejemplo-texto">Ejemplo: dos renglones con ${desnivelEjemplo.toFixed(1)}pt de desnivel real entre sus líneas base (columna justificada, no un salto real de columna).</span>
+        </div>
+        <div class="ejemplo-fila">
+          <span class="ejemplo-veredicto">${
+            cuentaComoConsecutivo
+              ? "Con este umbral, SÍ cuentan como renglones consecutivos para «Renglones seguidos»."
+              : "Con este umbral, NO cuentan como consecutivos — se tratarían como columnas distintas."
+          }</span>
+        </div>
+      </div>`;
+  }
+
   return "";
 }
 
@@ -514,6 +566,28 @@ async function cargarAjustesFiltro() {
         await postJSON("/api/reglas_filtro", { [regla.id]: input.checked });
       });
       div.appendChild(fila);
+
+      // «Cortes malsonantes» necesita algo más que un toggle: la lista de
+      // fragmentos a vigilar que el propio usuario puebla (vacía por
+      // defecto), un fragmento por línea -- mismo lugar que en Errata.
+      if (regla.id === "deteccion_cortes_malsonantes") {
+        const cajaFragmentos = document.createElement("div");
+        cajaFragmentos.className = "fragmentos-vigilar";
+        cajaFragmentos.innerHTML = `
+          <div class="regla-etiqueta">Fragmentos a vigilar</div>
+          <textarea rows="4" placeholder="Un fragmento por línea…">${escapeHtml(
+            (r.fragmentos_malsonantes || []).join("\n")
+          )}</textarea>`;
+        const textarea = cajaFragmentos.querySelector("textarea");
+        textarea.addEventListener("blur", async () => {
+          const fragmentos = textarea.value
+            .split("\n")
+            .map((f) => f.trim())
+            .filter(Boolean);
+          await postJSON("/api/reglas_filtro", { fragmentos_malsonantes_vigilar: fragmentos });
+        });
+        div.appendChild(cajaFragmentos);
+      }
     });
     cont.appendChild(div);
   });

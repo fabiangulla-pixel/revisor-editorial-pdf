@@ -137,7 +137,7 @@ label {
   flex: 1;
   min-width: 200px;
 }
-input[type="text"], input[type="password"], select {
+input[type="text"], input[type="password"], select, textarea {
   background: var(--surface2);
   border: 1px solid var(--border);
   color: var(--text);
@@ -147,7 +147,10 @@ input[type="text"], input[type="password"], select {
   font-family: inherit;
   transition: border-color 0.15s;
 }
-input:focus, select:focus { outline: none; border-color: var(--accent); }
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+
+.fragmentos-vigilar { padding: 10px 0 4px 54px; }
+.fragmentos-vigilar textarea { width: 100%; resize: vertical; }
 
 .btn {
   background: var(--surface3);

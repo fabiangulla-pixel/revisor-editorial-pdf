@@ -237,6 +237,11 @@ class AppCorrector(tk.Tk):
             param_id: tk.DoubleVar(value=default)
             for param_id, _, _, _minv, _maxv, _paso, default, _etq in PARAMETROS_FILTRO
         }
+        # Lista de vigilancia de "Cortes malsonantes" -- no es bool ni float,
+        # así que vive aparte de config_filtro/config_parametros. Vacía por
+        # defecto: la puebla el usuario, no viene precargada en el código.
+        self.fragmentos_malsonantes_vigilar: list[str] = []
+        self.txt_fragmentos_malsonantes: tk.Text | None = None
         self.motor = MotorRevision(log_callback=self._log)
 
         # Estado de los chips de filtro de la pestaña "Hallazgos" — qué
@@ -276,10 +281,24 @@ class AppCorrector(tk.Tk):
         for param_id, valor in guardado.items():
             if param_id in self.config_parametros:
                 self.config_parametros[param_id].set(float(valor))
+        fragmentos = guardado.get("fragmentos_malsonantes_vigilar")
+        if isinstance(fragmentos, list):
+            self.fragmentos_malsonantes_vigilar = [str(f) for f in fragmentos]
+
+    def _fragmentos_malsonantes_actuales(self) -> list[str]:
+        """Lee la lista de vigilancia directo del widget (si ya se construyó
+        la pestaña Ajustes) para no depender de que el usuario haya hecho
+        clic fuera del cuadro antes de guardar/analizar."""
+        if self.txt_fragmentos_malsonantes is None:
+            return self.fragmentos_malsonantes_vigilar
+        contenido = self.txt_fragmentos_malsonantes.get("1.0", "end")
+        return [f.strip() for f in contenido.splitlines() if f.strip()]
 
     def _guardar_config_filtro(self):
+        self.fragmentos_malsonantes_vigilar = self._fragmentos_malsonantes_actuales()
         datos = {regla_id: var.get() for regla_id, var in self.config_filtro.items()}
         datos.update({param_id: var.get() for param_id, var in self.config_parametros.items()})
+        datos["fragmentos_malsonantes_vigilar"] = self.fragmentos_malsonantes_vigilar
         ruta = self._ruta_config_filtro()
         try:
             ruta.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -294,6 +313,9 @@ class AppCorrector(tk.Tk):
             var.set(True)
         for param_id, _, _, _minv, _maxv, _paso, default, _etq in PARAMETROS_FILTRO:
             self.config_parametros[param_id].set(default)
+        self.fragmentos_malsonantes_vigilar = []
+        if self.txt_fragmentos_malsonantes is not None:
+            self.txt_fragmentos_malsonantes.delete("1.0", "end")
 
     def _cargar_perfil_gulla_automatico(self):
         """Carga el perfil de FAGV automáticamente si existe."""
@@ -848,6 +870,35 @@ class AppCorrector(tk.Tk):
                     anchor="w",
                 ).pack(fill="x", pady=(2, 0))
 
+                # «Cortes malsonantes» necesita algo más que un toggle: la
+                # lista de fragmentos a vigilar que el propio usuario puebla
+                # (vacía por defecto) — mismo lugar que en la web.
+                if regla_id == "deteccion_cortes_malsonantes":
+                    tk.Label(
+                        fila,
+                        text="Fragmentos a vigilar (uno por línea)",
+                        bg="#252537",
+                        fg="#cdd6f4",
+                        font=("Segoe UI", 8),
+                        anchor="w",
+                    ).pack(fill="x", pady=(6, 2))
+                    self.txt_fragmentos_malsonantes = tk.Text(
+                        fila,
+                        height=3,
+                        bg="#1e1e2e",
+                        fg="#cdd6f4",
+                        insertbackground="#cdd6f4",
+                        font=("Segoe UI", 9),
+                        relief="flat",
+                        highlightthickness=1,
+                        highlightbackground="#45475a",
+                        highlightcolor="#cba6f7",
+                    )
+                    self.txt_fragmentos_malsonantes.insert(
+                        "1.0", "\n".join(self.fragmentos_malsonantes_vigilar)
+                    )
+                    self.txt_fragmentos_malsonantes.pack(fill="x")
+
             tk.Frame(tarjeta, bg="#252537", height=6).pack(fill="x")
 
     def _construir_tarjeta_parametros(self, interior):
@@ -962,6 +1013,16 @@ class AppCorrector(tk.Tk):
             )
             lbl.pack(fill="x", padx=10, pady=4)
             self._filas_ejemplo_parametro[param_id] = lbl
+        elif param_id in (
+            "letras_coincidentes_min",
+            "renglones_seguidos_min",
+            "inclinacion_maxima_pt",
+        ):
+            # Recuento de filas de ejemplo variable según el valor del slider
+            # (p. ej. "renglones seguidos" dibuja tantas líneas como el
+            # umbral) -- más simple reconstruir el contenido del contenedor
+            # en cada cambio que llevar la cuenta de widgets creados.
+            self._filas_ejemplo_parametro[param_id] = contenedor
 
     def _actualizar_ejemplo_parametro(self, param_id, valor):
         widgets = self._filas_ejemplo_parametro.get(param_id)
@@ -986,6 +1047,93 @@ class AppCorrector(tk.Tk):
                 text="Ejemplo: el documento trae «comillas latinas» en el 92% de los "
                 "casos y “comillas inglesas” en el 8%. " + veredicto
             )
+        elif param_id == "letras_coincidentes_min":
+            for w in widgets.winfo_children():
+                w.destroy()
+            n = int(valor)
+
+            def _fila_prefijo(pal1, pal2, coinciden):
+                fila = tk.Frame(widgets, bg="#1e1e2e")
+                fila.pack(fill="x", padx=10, pady=3)
+                color1 = "#cba6f7" if coinciden else "#cdd6f4"
+                tk.Label(
+                    fila, text=f"{pal1[:n]}", bg="#1e1e2e", fg=color1, font=("Segoe UI", 8, "bold")
+                ).pack(side="left")
+                tk.Label(
+                    fila, text=f"{pal1[n:]} / ", bg="#1e1e2e", fg="#cdd6f4", font=("Segoe UI", 8)
+                ).pack(side="left")
+                tk.Label(
+                    fila, text=f"{pal2[:n]}", bg="#1e1e2e", fg=color1, font=("Segoe UI", 8, "bold")
+                ).pack(side="left")
+                tk.Label(
+                    fila, text=f"{pal2[n:]}", bg="#1e1e2e", fg="#cdd6f4", font=("Segoe UI", 8)
+                ).pack(side="left")
+                tk.Label(
+                    fila,
+                    text="se marca" if coinciden else "no se marca",
+                    bg="#1e1e2e",
+                    fg="#6c7086",
+                    font=("Segoe UI", 8),
+                ).pack(side="right")
+
+            comparten = "construir"[:n].lower() == "constante"[:n].lower()
+            _fila_prefijo("construir", "constante", comparten)
+            _fila_prefijo("canción", "atención", False)
+        elif param_id == "renglones_seguidos_min":
+            for w in widgets.winfo_children():
+                w.destroy()
+            n = int(valor)
+            for _ in range(n):
+                tk.Label(
+                    widgets,
+                    text="…un largo callejón oscuro…",
+                    bg="#1e1e2e",
+                    fg="#cdd6f4",
+                    font=("Segoe UI", 8),
+                ).pack(fill="x", padx=10, pady=2, anchor="w")
+            tk.Label(
+                widgets,
+                text=f"{n} renglones seguidos con «callejón» → se marca efecto eco/cascada.",
+                bg="#1e1e2e",
+                fg="#6c7086",
+                font=("Segoe UI", 8),
+                wraplength=680,
+                justify="left",
+                anchor="w",
+            ).pack(fill="x", padx=10, pady=(4, 4))
+        elif param_id == "inclinacion_maxima_pt":
+            for w in widgets.winfo_children():
+                w.destroy()
+            desnivel_ejemplo = 3.0
+            cuenta = desnivel_ejemplo <= valor
+            tk.Label(
+                widgets,
+                text=(
+                    f"Ejemplo: dos renglones con {desnivel_ejemplo:.1f}pt de desnivel real "
+                    "entre sus líneas base (columna justificada, no un salto real de columna)."
+                ),
+                bg="#1e1e2e",
+                fg="#cdd6f4",
+                font=("Segoe UI", 8),
+                wraplength=680,
+                justify="left",
+                anchor="w",
+            ).pack(fill="x", padx=10, pady=(4, 2))
+            tk.Label(
+                widgets,
+                text=(
+                    "Con este umbral, SÍ cuentan como renglones consecutivos."
+                    if cuenta
+                    else "Con este umbral, NO cuentan como consecutivos — se tratarían como "
+                    "columnas distintas."
+                ),
+                bg="#1e1e2e",
+                fg="#6c7086",
+                font=("Segoe UI", 8),
+                wraplength=680,
+                justify="left",
+                anchor="w",
+            ).pack(fill="x", padx=10, pady=(0, 4))
 
     @staticmethod
     def _snap_valor(valor: float, paso: float) -> float:
@@ -1294,6 +1442,9 @@ class AppCorrector(tk.Tk):
         justo antes de filtrar."""
         self.motor.config_filtro = {k: v.get() for k, v in self.config_filtro.items()}
         self.motor.config_filtro.update({k: v.get() for k, v in self.config_parametros.items()})
+        self.motor.config_filtro["fragmentos_malsonantes_vigilar"] = (
+            self._fragmentos_malsonantes_actuales()
+        )
 
     def _proceso_revision(self, ruta: str, sistema: str):
         try:
@@ -1340,6 +1491,13 @@ class AppCorrector(tk.Tk):
                         self._log(
                             f"  Pág. {num_pag}: {descartados} partición(es) descartada(s) como artefacto"
                         )
+                    # Detectores deterministas (repetición, cortes malsonantes) --
+                    # no pasan por el LLM, corren directo sobre el texto extraído.
+                    hall_pag.extend(
+                        self.motor.detectar_reglas_deterministas(
+                            datos["texto_completo"], analizador.extraer_lineas(i), num_pag
+                        )
+                    )
                     self.hallazgos.extend(hall_pag)
                     self._log(f"  Pág. {num_pag}: {len(hall_pag)} hallazgo(s)")
                     self.after(0, lambda hp=hall_pag: self._agregar_filas(hp))

@@ -1,5 +1,55 @@
 # CHANGELOG — RevisorEditorialPDF
 
+## 2026-07-19 (2)
+
+### 4 detectores deterministas de repetición (paridad de detección con Errata)
+
+Tras contrastar con una captura real de los "Ajustes" de Errata, se identificó
+que además de la interfaz de sliders (ya resuelta en la entrada anterior de
+hoy), faltaban 4 reglas de detección que Errata sí trae: no son ajustes al
+filtro de falsos positivos del LLM, son detectores de **patrón** nuevos que
+corren directo sobre el texto/las líneas extraídas de cada página, en paralelo
+al LLM — no le cuestan token ni dependen de que el modelo los note.
+
+- **`detectar_palabras_repetidas`** — la misma palabra (≥4 letras, no vacía)
+  reaparece dentro de una ventana de palabras cercana.
+- **`detectar_raices_repetidas`** — dos palabras DISTINTAS comparten un
+  prefijo de al menos N letras («construir»/«constante»), variante más sutil
+  de la anterior.
+- **`detectar_repeticion_lineas_consecutivas`** — la misma palabra aparece en
+  N o más renglones tipográficamente consecutivos (efecto "eco/cascada").
+  Necesitó un extractor nuevo, `AnalizadorPDF.extraer_lineas`, a nivel de
+  línea real (no de span) con su bbox, y un parámetro adicional,
+  `inclinacion_maxima_pt`: tolerancia de desnivel de línea base entre
+  renglones para seguir tratándolos como consecutivos (evita que un salto de
+  columna se lea como renglón siguiente).
+- **`detectar_cortes_malsonantes`** — avisa si un guion de fin de línea deja
+  un fragmento que coincide con una lista de vigilancia. **Vacía por
+  defecto**: es el usuario quien la puebla desde un textarea nuevo
+  ("Fragmentos a vigilar", un fragmento por línea) — no viene un diccionario
+  de palabras incluido en el código.
+- 3 parámetros nuevos en `PARAMETROS_FILTRO` (`letras_coincidentes_min`,
+  `renglones_seguidos_min`, `inclinacion_maxima_pt`) y 2 toggles nuevos en
+  `REGLAS_FILTRO` bajo un grupo nuevo, "Detección adicional (más allá del
+  LLM)" — reutilizan el mismo mecanismo de sliders/toggles/persistencia que
+  ya existía, sin plumbing nuevo para esa parte.
+- Cada slider nuevo trae su propio ejemplo visual en vivo (web y escritorio),
+  igual que los 3 de la entrada anterior — incluida la réplica exacta del
+  ejemplo de Errata («const**ruir**»/«const**ante**» con el prefijo
+  compartido resaltado).
+- Dos bugs reales encontrados y corregidos por los tests antes de llegar a
+  producción: la "mediana" usada para estimar el interlineado típico de la
+  página fallaba justo en el caso que debía detectar (con solo 2 saltos entre
+  líneas, la mediana cae en el mayor de los dos — el salto de columna que se
+  quería excluir); y el chequeo de "renglones seguidos" exigía que la palabra
+  repetida apareciera en TODAS las líneas de una racha larga en vez de en
+  una ventana de N consecutivas dentro de ella.
+- Evaluado y NO portado a este proyecto: `dehyphen`/modelos de lenguaje para
+  reconstruir palabras cortadas (nuestro caso de uso es distinto — filtramos
+  ruido de partición, no reconstruimos texto) y extractor `marker`/GROBID
+  (dependencia de deep learning, incompatible con el empaquetado ligero en
+  `.exe`).
+
 ## 2026-07-19
 
 ### Certeza visible + reintento de red + paridad de escritorio

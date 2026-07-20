@@ -174,6 +174,8 @@ class EstadoServidor:
                 config[k] = bool(v)
             elif k in ids_parametros:
                 config[k] = float(v)
+            elif k == "fragmentos_malsonantes_vigilar":
+                config[k] = [str(f) for f in v] if isinstance(v, list) else []
         self.motor.config_filtro = config
 
     def guardar_config_filtro(self):
@@ -191,6 +193,9 @@ class EstadoServidor:
         }
         for param_id, _, _, _, _, _, default, _ in PARAMETROS_FILTRO:
             datos[param_id] = self.motor.config_filtro.get(param_id, default)
+        datos["fragmentos_malsonantes_vigilar"] = self.motor.config_filtro.get(
+            "fragmentos_malsonantes_vigilar", []
+        )
         ruta.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8")
 
     # ── construcción del proveedor de IA ────────────────────────────────
@@ -285,6 +290,13 @@ def ejecutar_revision(estado: EstadoServidor, ruta_pdf: str, proveedor_id: str):
                     estado._log(
                         f"  Pág. {num_pag}: {descartados} partición(es) descartada(s) como artefacto"
                     )
+                # Detectores deterministas (repetición, cortes malsonantes) --
+                # no pasan por el LLM, corren directo sobre el texto extraído.
+                hall_pag.extend(
+                    estado.motor.detectar_reglas_deterministas(
+                        datos["texto_completo"], analizador.extraer_lineas(i), num_pag
+                    )
+                )
                 estado.hallazgos.extend(hall_pag)
                 estado._log(f"  Pág. {num_pag}: {len(hall_pag)} hallazgo(s)")
                 time.sleep(0.2)
@@ -575,7 +587,15 @@ class ManejadorAPI(BaseHTTPRequestHandler):
                     PARAMETROS_FILTRO
                 )
             ]
-            return self._json({"grupos": grupos, "parametros": parametros})
+            return self._json(
+                {
+                    "grupos": grupos,
+                    "parametros": parametros,
+                    "fragmentos_malsonantes": self.estado.motor.config_filtro.get(
+                        "fragmentos_malsonantes_vigilar", []
+                    ),
+                }
+            )
 
         if ruta == "/api/proveedores":
             from costos import MODELOS_DISPONIBLES, MODELOS_OLLAMA_SUGERIDOS
@@ -797,6 +817,10 @@ class ManejadorAPI(BaseHTTPRequestHandler):
                     self.estado.motor.config_filtro[clave] = bool(valor)
                 elif clave in ids_parametros:
                     self.estado.motor.config_filtro[clave] = float(valor)
+                elif clave == "fragmentos_malsonantes_vigilar":
+                    self.estado.motor.config_filtro[clave] = (
+                        [str(f) for f in valor] if isinstance(valor, list) else []
+                    )
             self.estado.guardar_config_filtro()
             return self._json({"ok": True})
 
@@ -805,6 +829,7 @@ class ManejadorAPI(BaseHTTPRequestHandler):
                 self.estado.motor.config_filtro[regla_id] = True
             for param_id, _, _, _, _, _, default, _ in PARAMETROS_FILTRO:
                 self.estado.motor.config_filtro[param_id] = default
+            self.estado.motor.config_filtro["fragmentos_malsonantes_vigilar"] = []
             self.estado.guardar_config_filtro()
             return self._json({"ok": True})
 
