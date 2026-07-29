@@ -49,10 +49,9 @@ from motor import (
     anotar_pdf,
     aplicar_zonas_exclusion,
     calcular_bboxes,
-    extraer_urls_pdf,
     generar_informes,
     generar_xfdf,
-    verificar_urls,
+    verificar_enlaces_pdf,
 )
 
 # En un .exe de PyInstaller (onefile), __file__ apunta al directorio temporal
@@ -238,7 +237,12 @@ def _sincronizar_motor():
 
 
 def ejecutar_revision(estado: EstadoServidor, ruta_pdf: str, proveedor_id: str):
-    estado.zonas_exclusion = {}  # PDF nuevo: las zonas de la revisión anterior no aplican
+    # Las zonas se dibujan sobre un documento concreto: si se revisa OTRO PDF
+    # no tienen sentido y se descartan, pero volver a revisar el MISMO archivo
+    # (con otro proveedor, o tras cambiar los ajustes) debe conservarlas — el
+    # usuario ya hizo el trabajo de delimitar sus cornisas y pies.
+    if ruta_pdf != estado.ruta_pdf_analizada:
+        estado.zonas_exclusion = {}
     try:
         proveedor = estado.construir_proveedor(proveedor_id)
         ok, msg = proveedor.verificar_conexion()
@@ -408,35 +412,10 @@ def reaplicar_filtro_documental(estado: EstadoServidor) -> dict:
 
 def _verificar_enlaces_en_hilo(estado: EstadoServidor, ruta_pdf: str):
     """Extrae y verifica URLs en segundo plano — puede tardar varios segundos
-    con muchas referencias, no debe bloquear el servidor."""
+    con muchas referencias, no debe bloquear el servidor. El trabajo real vive
+    en motor.verificar_enlaces_pdf, compartido con la GUI de escritorio."""
     try:
-        urls_paginas = extraer_urls_pdf(ruta_pdf)
-        if not urls_paginas:
-            estado._log("No se encontraron URLs en el documento.")
-            estado.enlaces = []
-            return
-        estado._log(f"Verificando {len(urls_paginas)} enlace(s)…")
-        resultados = verificar_urls(list(urls_paginas.keys()))
-        por_url = {r["url"]: r for r in resultados}
-        estado.enlaces = sorted(
-            (
-                {
-                    "url": url,
-                    "paginas": paginas,
-                    "estado": por_url[url]["estado"],
-                    "codigo": por_url[url]["codigo"],
-                }
-                for url, paginas in urls_paginas.items()
-            ),
-            key=lambda e: e["paginas"][0],
-        )
-        rotos = sum(1 for e in estado.enlaces if e["estado"] == "roto")
-        no_responde = sum(1 for e in estado.enlaces if e["estado"] == "no_responde")
-        estado._log(
-            f"Enlaces verificados: {len(estado.enlaces)} total, {rotos} roto(s), "
-            f"{no_responde} sin respuesta.",
-            "ok" if not rotos else "warn",
-        )
+        estado.enlaces = verificar_enlaces_pdf(ruta_pdf, log_callback=estado._log)
     except Exception as e:
         estado._log(f"Error verificando enlaces: {e}", "error")
     finally:

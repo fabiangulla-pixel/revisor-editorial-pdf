@@ -1258,6 +1258,102 @@ def aplicar_zonas_exclusion(hallazgos: list, zonas: dict) -> list:
     return resultado
 
 
+def rect_a_puntos_pdf(
+    x0: float,
+    y0: float,
+    x1: float,
+    y1: float,
+    zoom: float,
+    ancho_pt: float | None = None,
+    alto_pt: float | None = None,
+    minimo_px: float = 6.0,
+) -> list[float] | None:
+    """Convierte un rectángulo dibujado sobre un visor (píxeles de pantalla a
+    un factor de `zoom` dado) al espacio de puntos PDF que usan `bbox` y
+    `aplicar_zonas_exclusion`.
+
+    Normaliza el orden del arrastre — se puede dibujar de derecha a izquierda
+    o de abajo hacia arriba — y recorta a los límites de la página si se dan
+    sus dimensiones. Devuelve None si el arrastre es más pequeño que
+    `minimo_px`: un clic suelto o un temblor de ratón no es una zona, y
+    aceptarlo dejaría zonas invisibles descartando hallazgos sin que el
+    usuario entienda por qué.
+
+    Es la misma conversión que hace el visor web en JS (dividir por la escala
+    del viewport de PDF.js); aquí vive en Python para que la GUI de escritorio
+    no la reimplemente por su cuenta."""
+    if zoom <= 0:
+        return None
+    ancho_px = abs(x1 - x0)
+    alto_px = abs(y1 - y0)
+    if ancho_px < minimo_px or alto_px < minimo_px:
+        return None
+
+    px0, px1 = sorted((x0, x1))
+    py0, py1 = sorted((y0, y1))
+    zona = [px0 / zoom, py0 / zoom, px1 / zoom, py1 / zoom]
+
+    if ancho_pt is not None:
+        zona[0] = max(0.0, min(zona[0], ancho_pt))
+        zona[2] = max(0.0, min(zona[2], ancho_pt))
+    if alto_pt is not None:
+        zona[1] = max(0.0, min(zona[1], alto_pt))
+        zona[3] = max(0.0, min(zona[3], alto_pt))
+    return [round(v, 2) for v in zona]
+
+
+def indice_zona_en_punto(zonas_pagina: list, x: float, y: float) -> int | None:
+    """Índice de la zona que contiene el punto (x, y) en puntos PDF, o None.
+
+    Recorre de atrás hacia adelante para devolver la dibujada más
+    recientemente cuando dos se superponen — es la que el usuario ve encima y
+    la que espera borrar. Permite quitar una zona concreta sin tener que
+    limpiar la página entera."""
+    for i in range(len(zonas_pagina) - 1, -1, -1):
+        z = zonas_pagina[i]
+        if len(z) == 4 and z[0] <= x <= z[2] and z[1] <= y <= z[3]:
+            return i
+    return None
+
+
+class VisorPDF:
+    """Renderiza páginas de un PDF para un visor embebido, manteniendo el
+    documento abierto entre páginas.
+
+    Devuelve la página en PPM binario porque `tk.PhotoImage(data=…)` lo lee
+    directo: así el visor de escritorio no necesita Pillow (el proyecto no lo
+    tiene entre sus dependencias y añadirlo engordaría el .exe por una
+    conversión de formato que PyMuPDF ya sabe hacer). Reabrir el documento en
+    cada cambio de página sería notablemente más lento con los PDF que vive
+    editando el usuario, que están en una unidad de Google Drive."""
+
+    def __init__(self, ruta_pdf: str):
+        self.ruta_pdf = ruta_pdf
+        self.doc = fitz.open(ruta_pdf)
+
+    @property
+    def num_paginas(self) -> int:
+        return self.doc.page_count
+
+    def tamano_pagina(self, indice: int) -> tuple[float, float]:
+        """(ancho, alto) de la página en puntos PDF — el espacio en el que se
+        expresan las zonas de exclusión y los bbox de los hallazgos."""
+        rect = self.doc[indice].rect
+        return rect.width, rect.height
+
+    def render(self, indice: int, zoom: float = 1.0) -> tuple[bytes, int, int]:
+        """(datos PPM, ancho_px, alto_px) de la página `indice` (0-based)."""
+        pagina = self.doc[indice]
+        pix = pagina.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        return pix.tobytes("ppm"), pix.width, pix.height
+
+    def cerrar(self):
+        try:
+            self.doc.close()
+        except Exception:
+            pass
+
+
 # ── Verificación de URLs en vivo ─────────────────────────────────────────
 # Errata comprueba si los enlaces de un PDF realmente resuelven (no solo si
 # el texto está bien formado) — la calibración de hoy con NovumJus se
@@ -1345,6 +1441,48 @@ def verificar_urls(urls: list[str], max_hilos: int = 8, timeout: float = 6.0) ->
         for fut in as_completed(futuros):
             resultados.append(fut.result())
     return resultados
+
+
+def verificar_enlaces_pdf(ruta_pdf: str, log_callback=None) -> list[dict]:
+    """Extrae las URLs de un PDF, las verifica y devuelve la lista ordenada
+    por la primera página en que aparece cada una:
+    [{url, paginas, estado, codigo}, …].
+
+    Es el paso completo que consumen las dos interfaces — la web desde su
+    hilo de fondo y la GUI de escritorio desde el suyo —, para que el orden,
+    el formato de cada fila y los mensajes de log sean idénticos en ambas."""
+
+    def _log(msg, nivel="info"):
+        if log_callback:
+            log_callback(msg, nivel)
+
+    urls_paginas = extraer_urls_pdf(ruta_pdf)
+    if not urls_paginas:
+        _log("No se encontraron URLs en el documento.")
+        return []
+
+    _log(f"Verificando {len(urls_paginas)} enlace(s)…")
+    resultados = verificar_urls(list(urls_paginas.keys()))
+    por_url = {r["url"]: r for r in resultados}
+    enlaces = sorted(
+        (
+            {
+                "url": url,
+                "paginas": paginas,
+                "estado": por_url[url]["estado"],
+                "codigo": por_url[url]["codigo"],
+            }
+            for url, paginas in urls_paginas.items()
+        ),
+        key=lambda e: e["paginas"][0],
+    )
+    rotos = sum(1 for e in enlaces if e["estado"] == "roto")
+    no_responde = sum(1 for e in enlaces if e["estado"] == "no_responde")
+    _log(
+        f"Enlaces verificados: {len(enlaces)} total, {rotos} roto(s), {no_responde} sin respuesta.",
+        "ok" if not rotos else "warn",
+    )
+    return enlaces
 
 
 # ── Detectores deterministas de repetición (no pasan por el LLM) ────────────

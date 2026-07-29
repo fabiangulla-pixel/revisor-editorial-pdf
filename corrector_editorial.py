@@ -39,9 +39,15 @@ from motor import (  # noqa: E402
     PerfilEstilo,
     PerplexityProveedor,
     ProveedorLLM,
+    VisorPDF,
     anotar_pdf,
+    aplicar_zonas_exclusion,
+    calcular_bboxes,
     generar_informes,
     generar_xfdf,
+    indice_zona_en_punto,
+    rect_a_puntos_pdf,
+    verificar_enlaces_pdf,
 )
 
 
@@ -221,6 +227,26 @@ class AppCorrector(tk.Tk):
         self.ruta_informe = ""
         self.ruta_csv = ""
         self.en_proceso = False
+
+        # ── Visor de PDF embebido y zonas de exclusión ───────────────────
+        # {numero_de_pagina: [[x0,y0,x1,y1], ...]} en puntos PDF — exactamente
+        # el mismo espacio de coordenadas y el mismo motor
+        # (aplicar_zonas_exclusion) que usa la interfaz web.
+        self.zonas_exclusion: dict[int, list] = {}
+        self.visor: VisorPDF | None = None
+        self.visor_ruta = ""
+        self.visor_pagina = 1  # 1-based, igual que se le muestra al usuario
+        self.visor_zoom = 1.3  # mismo zoom inicial que el visor web
+        self.modo_zona = tk.BooleanVar(value=False)
+        # Tk no guarda referencia propia a las PhotoImage: si esta se pierde,
+        # la página renderizada desaparece del Canvas (imagen recolectada).
+        self._img_pagina = None
+        self._hallazgo_visor: dict | None = None
+        self._arrastre_inicio: tuple[float, float] | None = None
+
+        # ── Verificación de enlaces en vivo ──────────────────────────────
+        self.enlaces: list = []
+        self.verificando_enlaces = False
 
         # Un BooleanVar por regla de REGLAS_FILTRO, activo por defecto (mismo
         # comportamiento que antes de existir la pestaña "Ajustes de filtrado").
@@ -438,6 +464,8 @@ class AppCorrector(tk.Tk):
         tab_config = ttk.Frame(nb)
         tab_estilo = ttk.Frame(nb)
         tab_hallazgos = ttk.Frame(nb)
+        tab_visor = ttk.Frame(nb)
+        tab_enlaces = ttk.Frame(nb)
         tab_filtro = ttk.Frame(nb)
         tab_entregables = ttk.Frame(nb)
         tab_log = ttk.Frame(nb)
@@ -446,6 +474,8 @@ class AppCorrector(tk.Tk):
         nb.add(tab_config, text="  Configuración  ")
         nb.add(tab_estilo, text="  ◆ Perfil de estilo  ")
         nb.add(tab_hallazgos, text="  Hallazgos  ")
+        nb.add(tab_visor, text="  ▦ Visor y zonas  ")
+        nb.add(tab_enlaces, text="  🔗 Enlaces  ")
         nb.add(tab_filtro, text="  ⚙ Ajustes de filtrado  ")
         nb.add(tab_entregables, text="  Entregables  ")
         nb.add(tab_log, text="  Log  ")
@@ -454,6 +484,8 @@ class AppCorrector(tk.Tk):
         self._tab_config(tab_config)
         self._tab_estilo(tab_estilo)
         self._tab_hallazgos(tab_hallazgos)
+        self._tab_visor(tab_visor)
+        self._tab_enlaces(tab_enlaces)
         self._tab_filtro(tab_filtro)
         self._tab_entregables(tab_entregables)
         self._tab_log(tab_log)
@@ -747,7 +779,433 @@ class AppCorrector(tk.Tk):
         scroll_y.pack(side="right", fill="y")
         scroll_x.pack(fill="x", padx=12)
 
+        # Doble clic = "clic para ver": salta al visor, a la página del
+        # hallazgo, con su fragmento resaltado (equivalente al clic sobre una
+        # fila en la interfaz web).
+        self.tree.bind("<Double-1>", self._ver_hallazgo_en_visor)
+
         self._actualizar_chips_filtro()
+
+    # ── TAB VISOR Y ZONAS DE EXCLUSIÓN ───────────────────────────────────────
+
+    COLOR_ZONA = "#9399b2"
+
+    def _tab_visor(self, parent):
+        barra = ttk.Frame(parent)
+        barra.pack(fill="x", padx=12, pady=(10, 2))
+
+        ttk.Button(barra, text="Abrir PDF en el visor", command=self._cargar_pdf_en_visor).pack(
+            side="left"
+        )
+        ttk.Button(barra, text="◀", width=3, command=lambda: self._mover_pagina_visor(-1)).pack(
+            side="left", padx=(14, 2)
+        )
+        self.lbl_pagina_visor = ttk.Label(barra, text="— / —", width=13, anchor="center")
+        self.lbl_pagina_visor.pack(side="left")
+        ttk.Button(barra, text="▶", width=3, command=lambda: self._mover_pagina_visor(1)).pack(
+            side="left", padx=2
+        )
+        ttk.Button(barra, text="−", width=3, command=lambda: self._cambiar_zoom_visor(-0.2)).pack(
+            side="left", padx=(14, 2)
+        )
+        self.lbl_zoom_visor = ttk.Label(barra, text="130 %", width=7, anchor="center")
+        self.lbl_zoom_visor.pack(side="left")
+        ttk.Button(barra, text="+", width=3, command=lambda: self._cambiar_zoom_visor(0.2)).pack(
+            side="left", padx=2
+        )
+
+        barra2 = ttk.Frame(parent)
+        barra2.pack(fill="x", padx=12, pady=(4, 6))
+        ttk.Label(barra2, text="Modo dibujar zona de exclusión:").pack(side="left")
+        ToggleSwitch(barra2, variable=self.modo_zona, command=self._actualizar_cursor_visor).pack(
+            side="left", padx=8
+        )
+        ttk.Button(
+            barra2, text="Limpiar zonas de esta página", command=self._limpiar_zonas_pagina
+        ).pack(side="left", padx=(14, 4))
+        ttk.Button(barra2, text="Limpiar todas", command=self._limpiar_todas_las_zonas).pack(
+            side="left"
+        )
+        self.lbl_zonas_info = ttk.Label(barra2, text="Sin zonas", foreground="#6c7086")
+        self.lbl_zonas_info.pack(side="right")
+
+        ttk.Label(
+            parent,
+            text="Con el modo activo, arrastra sobre la página para excluir una franja "
+            "(cornisas, pies, columnas de tabla). Los hallazgos cuyo fragmento caiga dentro "
+            "se descartan al reaplicar el filtro, sin gastar IA. Clic derecho sobre una zona "
+            "para borrarla.",
+            foreground="#6c7086",
+            wraplength=940,
+            justify="left",
+        ).pack(fill="x", padx=12, pady=(0, 6))
+
+        cuerpo = ttk.Frame(parent)
+        cuerpo.pack(fill="both", expand=True, padx=12)
+
+        self.canvas_visor = tk.Canvas(cuerpo, bg="#11111b", highlightthickness=0)
+        scroll_v = ttk.Scrollbar(cuerpo, orient="vertical", command=self.canvas_visor.yview)
+        scroll_h = ttk.Scrollbar(parent, orient="horizontal", command=self.canvas_visor.xview)
+        self.canvas_visor.configure(yscrollcommand=scroll_v.set, xscrollcommand=scroll_h.set)
+        self.canvas_visor.pack(side="left", fill="both", expand=True)
+        scroll_v.pack(side="right", fill="y")
+        scroll_h.pack(fill="x", padx=12, pady=(0, 8))
+
+        self.canvas_visor.bind("<Button-1>", self._inicio_zona)
+        self.canvas_visor.bind("<B1-Motion>", self._arrastrando_zona)
+        self.canvas_visor.bind("<ButtonRelease-1>", self._fin_zona)
+        self.canvas_visor.bind("<Button-3>", self._borrar_zona_bajo_cursor)
+        self._activar_rueda(self.canvas_visor)
+
+        self.canvas_visor.create_text(
+            20,
+            20,
+            anchor="nw",
+            text="Selecciona un PDF en la pestaña Revisión y pulsa «Abrir PDF en el visor».",
+            fill="#6c7086",
+            font=("Segoe UI", 10),
+            tags="vacio",
+        )
+
+    @staticmethod
+    def _activar_rueda(canvas: tk.Canvas):
+        """Rueda del ratón sobre ESTE canvas y solo mientras el puntero está
+        encima. Con bind_all incondicional, el último canvas construido se
+        queda con la rueda de toda la aplicación y los demás dejan de
+        responder."""
+
+        def _rueda(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _rueda))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+    def _cargar_pdf_en_visor(self, ruta: str = "", pagina: int | None = None):
+        ruta = ruta or self.ruta_pdf_analizada or self.ruta_pdf.get().strip()
+        if not ruta or not Path(ruta).exists():
+            messagebox.showwarning(
+                "Sin PDF", "Selecciona primero un archivo PDF en la pestaña Revisión."
+            )
+            return
+        if self.visor is not None and self.visor_ruta == ruta:
+            if pagina:
+                self.visor_pagina = pagina
+            self._render_pagina_visor()
+            return
+        try:
+            if self.visor is not None:
+                self.visor.cerrar()
+            self.visor = VisorPDF(ruta)
+        except Exception as e:
+            messagebox.showerror("No se pudo abrir el PDF", str(e))
+            return
+        self.visor_ruta = ruta
+        self.visor_pagina = pagina or 1
+        self._render_pagina_visor()
+
+    def _render_pagina_visor(self):
+        if self.visor is None:
+            return
+        self.visor_pagina = max(1, min(self.visor_pagina, self.visor.num_paginas))
+        try:
+            ppm, ancho_px, alto_px = self.visor.render(self.visor_pagina - 1, self.visor_zoom)
+        except Exception as e:
+            self._log(f"No se pudo renderizar la página {self.visor_pagina}: {e}", "error")
+            return
+
+        self._img_pagina = tk.PhotoImage(data=ppm)
+        self.canvas_visor.delete("all")
+        self.canvas_visor.create_image(0, 0, anchor="nw", image=self._img_pagina, tags="pagina")
+        self.canvas_visor.configure(scrollregion=(0, 0, ancho_px, alto_px))
+
+        self.lbl_pagina_visor.configure(text=f"{self.visor_pagina} / {self.visor.num_paginas}")
+        self.lbl_zoom_visor.configure(text=f"{round(self.visor_zoom * 100)} %")
+        self._dibujar_overlay_visor()
+        self._actualizar_cursor_visor()
+
+    def _dibujar_overlay_visor(self):
+        """Redibuja lo que va ENCIMA de la página: el hallazgo activo y las
+        zonas de exclusión de esta página. La imagen renderizada no se toca."""
+        cv = self.canvas_visor
+        cv.delete("overlay")
+        z = self.visor_zoom
+
+        h = self._hallazgo_visor
+        if h and h.get("pagina") == self.visor_pagina and h.get("bbox"):
+            x0, y0, x1, y1 = h["bbox"]
+            color = self.COLORES_GRAVEDAD.get(h.get("gravedad", "menor"), "#cba6f7")
+            cv.create_rectangle(
+                x0 * z - 3,
+                y0 * z - 3,
+                x1 * z + 3,
+                y1 * z + 3,
+                outline=color,
+                width=2,
+                fill=color,
+                stipple="gray25",
+                tags="overlay",
+            )
+
+        for x0, y0, x1, y1 in self.zonas_exclusion.get(self.visor_pagina, []):
+            cv.create_rectangle(
+                x0 * z,
+                y0 * z,
+                x1 * z,
+                y1 * z,
+                outline=self.COLOR_ZONA,
+                width=2,
+                dash=(5, 4),
+                fill=self.COLOR_ZONA,
+                stipple="gray25",
+                tags="overlay",
+            )
+
+        self._actualizar_info_zonas()
+
+    def _actualizar_info_zonas(self):
+        total = sum(len(v) for v in self.zonas_exclusion.values())
+        en_pagina = len(self.zonas_exclusion.get(self.visor_pagina, []))
+        if total == 0:
+            self.lbl_zonas_info.configure(text="Sin zonas", foreground="#6c7086")
+        else:
+            self.lbl_zonas_info.configure(
+                text=f"{en_pagina} zona(s) en esta página · {total} en el documento",
+                foreground="#cdd6f4",
+            )
+
+    def _actualizar_cursor_visor(self):
+        self.canvas_visor.configure(cursor="crosshair" if self.modo_zona.get() else "")
+
+    def _mover_pagina_visor(self, delta: int):
+        if self.visor is None:
+            return
+        self.visor_pagina += delta
+        self._render_pagina_visor()
+
+    def _cambiar_zoom_visor(self, delta: float):
+        if self.visor is None:
+            return
+        self.visor_zoom = round(max(0.4, min(3.0, self.visor_zoom + delta)), 2)
+        self._render_pagina_visor()
+
+    def _ver_hallazgo_en_visor(self, _event=None):
+        seleccion = self.tree.selection()
+        if not seleccion:
+            return
+        idx = self.tree.index(seleccion[0])
+        if idx >= len(self._orden_mapa):
+            return
+        hallazgo = self._orden_mapa[idx]
+        self._hallazgo_visor = hallazgo
+        ruta = self.ruta_pdf_analizada or self.ruta_pdf.get().strip()
+        self._cargar_pdf_en_visor(ruta, pagina=hallazgo.get("pagina", 1))
+
+    # ── zonas de exclusión: dibujo con el ratón ──────────────────────────────
+
+    def _punto_canvas(self, event) -> tuple[float, float]:
+        """Coordenadas del evento en el sistema del canvas (no en el de la
+        ventana): sin esto, con la página desplazada la zona se dibujaría
+        corrida por la cantidad de scroll."""
+        return self.canvas_visor.canvasx(event.x), self.canvas_visor.canvasy(event.y)
+
+    def _inicio_zona(self, event):
+        if not self.modo_zona.get() or self.visor is None:
+            return
+        self._arrastre_inicio = self._punto_canvas(event)
+
+    def _arrastrando_zona(self, event):
+        if self._arrastre_inicio is None:
+            return
+        x0, y0 = self._arrastre_inicio
+        x1, y1 = self._punto_canvas(event)
+        self.canvas_visor.delete("zona_temp")
+        self.canvas_visor.create_rectangle(
+            x0,
+            y0,
+            x1,
+            y1,
+            outline="#cba6f7",
+            width=2,
+            fill="#cba6f7",
+            stipple="gray25",
+            tags="zona_temp",
+        )
+
+    def _fin_zona(self, event):
+        if self._arrastre_inicio is None or self.visor is None:
+            return
+        x0, y0 = self._arrastre_inicio
+        x1, y1 = self._punto_canvas(event)
+        self._arrastre_inicio = None
+        self.canvas_visor.delete("zona_temp")
+
+        ancho_pt, alto_pt = self.visor.tamano_pagina(self.visor_pagina - 1)
+        zona = rect_a_puntos_pdf(x0, y0, x1, y1, self.visor_zoom, ancho_pt, alto_pt)
+        if zona is None:
+            return  # arrastre insignificante: un clic suelto no es una zona
+        self.zonas_exclusion.setdefault(self.visor_pagina, []).append(zona)
+        self._log(
+            f"Zona de exclusión añadida en la pág. {self.visor_pagina}: "
+            f"({zona[0]:.0f}, {zona[1]:.0f})–({zona[2]:.0f}, {zona[3]:.0f}) pt."
+        )
+        self._dibujar_overlay_visor()
+        self._reaplicar_filtro_documental(silencioso=True)
+
+    def _borrar_zona_bajo_cursor(self, event):
+        if self.visor is None:
+            return
+        zonas = self.zonas_exclusion.get(self.visor_pagina, [])
+        if not zonas:
+            return
+        x, y = self._punto_canvas(event)
+        idx = indice_zona_en_punto(zonas, x / self.visor_zoom, y / self.visor_zoom)
+        if idx is None:
+            return
+        zonas.pop(idx)
+        if not zonas:
+            self.zonas_exclusion.pop(self.visor_pagina, None)
+        self._log(f"Zona de exclusión eliminada en la pág. {self.visor_pagina}.")
+        self._dibujar_overlay_visor()
+        self._reaplicar_filtro_documental(silencioso=True)
+
+    def _limpiar_zonas_pagina(self):
+        if self.zonas_exclusion.pop(self.visor_pagina, None):
+            self._log(f"Zonas de la pág. {self.visor_pagina} eliminadas.")
+            self._dibujar_overlay_visor()
+            self._reaplicar_filtro_documental(silencioso=True)
+
+    def _limpiar_todas_las_zonas(self):
+        if not self.zonas_exclusion:
+            return
+        self.zonas_exclusion = {}
+        self._log("Todas las zonas de exclusión eliminadas.")
+        self._dibujar_overlay_visor()
+        self._reaplicar_filtro_documental(silencioso=True)
+
+    # ── TAB ENLACES ──────────────────────────────────────────────────────────
+
+    ESTADOS_ENLACE = {
+        "ok": ("✓ OK", "#a6e3a1"),
+        "roto": ("✗ Roto", "#f38ba8"),
+        "no_responde": ("⚠ Sin respuesta", "#fab387"),
+        "no_verificable": ("◌ No verificable", "#f9e2af"),
+    }
+
+    def _tab_enlaces(self, parent):
+        barra = ttk.Frame(parent)
+        barra.pack(fill="x", padx=12, pady=(12, 4))
+        self.btn_verificar_enlaces = ttk.Button(
+            barra,
+            text="🔗 Verificar enlaces",
+            style="Accent.TButton",
+            command=self._verificar_enlaces,
+        )
+        self.btn_verificar_enlaces.pack(side="left")
+        self.lbl_enlaces_resumen = ttk.Label(barra, text="", foreground="#6c7086")
+        self.lbl_enlaces_resumen.pack(side="left", padx=14)
+
+        ttk.Label(
+            parent,
+            text="Comprueba con una petición HTTP real si cada URL del PDF responde — no solo "
+            "si está bien escrita. 401/403/429 se marcan «no verificable»: muchos sitios "
+            "académicos bloquean peticiones automáticas aunque el enlace funcione en el "
+            "navegador. Doble clic para abrir un enlace.",
+            foreground="#6c7086",
+            wraplength=940,
+            justify="left",
+        ).pack(fill="x", padx=12, pady=(0, 8))
+
+        cuerpo = ttk.Frame(parent)
+        cuerpo.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+
+        cols = ("estado", "codigo", "paginas", "url")
+        self.tree_enlaces = ttk.Treeview(cuerpo, columns=cols, show="headings")
+        for col, titulo, ancho in [
+            ("estado", "Estado", 130),
+            ("codigo", "Código", 70),
+            ("paginas", "Páginas", 110),
+            ("url", "URL", 620),
+        ]:
+            self.tree_enlaces.heading(col, text=titulo)
+            self.tree_enlaces.column(col, width=ancho, minwidth=50)
+
+        for estado, (_etiqueta, color) in self.ESTADOS_ENLACE.items():
+            self.tree_enlaces.tag_configure(estado, foreground=color)
+
+        scroll = ttk.Scrollbar(cuerpo, orient="vertical", command=self.tree_enlaces.yview)
+        self.tree_enlaces.configure(yscrollcommand=scroll.set)
+        self.tree_enlaces.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        self.tree_enlaces.bind("<Double-1>", self._abrir_enlace_seleccionado)
+
+    def _verificar_enlaces(self):
+        if self.verificando_enlaces:
+            return
+        ruta = self.ruta_pdf.get().strip() or self.ruta_pdf_analizada
+        if not ruta or not Path(ruta).exists():
+            messagebox.showwarning(
+                "Sin PDF", "Selecciona primero un archivo PDF en la pestaña Revisión."
+            )
+            return
+        self.verificando_enlaces = True
+        self.btn_verificar_enlaces.configure(state="disabled", text="Verificando…")
+        self.lbl_enlaces_resumen.configure(text="Comprobando enlaces…", foreground="#cdd6f4")
+        threading.Thread(target=self._proceso_verificar_enlaces, args=(ruta,), daemon=True).start()
+
+    def _proceso_verificar_enlaces(self, ruta: str):
+        try:
+            enlaces = verificar_enlaces_pdf(ruta, log_callback=self._log)
+            self.enlaces = enlaces
+            self.after(0, self._refrescar_tabla_enlaces)
+        except Exception as e:
+            self._log(f"Error verificando enlaces: {e}", "error")
+        finally:
+            self.verificando_enlaces = False
+            self.after(
+                0,
+                lambda: self.btn_verificar_enlaces.configure(
+                    state="normal", text="🔗 Verificar enlaces"
+                ),
+            )
+
+    def _refrescar_tabla_enlaces(self):
+        for item in self.tree_enlaces.get_children():
+            self.tree_enlaces.delete(item)
+        for e in self.enlaces:
+            etiqueta, _color = self.ESTADOS_ENLACE.get(e["estado"], (e["estado"], "#cdd6f4"))
+            self.tree_enlaces.insert(
+                "",
+                "end",
+                values=(
+                    etiqueta,
+                    e.get("codigo") if e.get("codigo") is not None else "—",
+                    ", ".join(str(p) for p in e.get("paginas", [])),
+                    e["url"],
+                ),
+                tags=(e["estado"],),
+            )
+        rotos = sum(1 for e in self.enlaces if e["estado"] == "roto")
+        sin_respuesta = sum(1 for e in self.enlaces if e["estado"] == "no_responde")
+        if self.enlaces:
+            self.lbl_enlaces_resumen.configure(
+                text=f"{len(self.enlaces)} enlace(s) — {rotos} roto(s), "
+                f"{sin_respuesta} sin respuesta",
+                foreground="#f38ba8" if rotos else "#a6e3a1",
+            )
+        else:
+            self.lbl_enlaces_resumen.configure(
+                text="No se encontraron URLs en el documento.", foreground="#6c7086"
+            )
+
+    def _abrir_enlace_seleccionado(self, _event=None):
+        seleccion = self.tree_enlaces.selection()
+        if not seleccion:
+            return
+        url = self.tree_enlaces.item(seleccion[0], "values")[3]
+        if url:
+            import webbrowser
+
+            webbrowser.open(url)
 
     # ── TAB AJUSTES DE FILTRADO ──────────────────────────────────────────────
 
@@ -763,11 +1221,7 @@ class AppCorrector(tk.Tk):
         ventana = canvas.create_window((0, 0), window=interior, anchor="nw")
         canvas.bind("<Configure>", lambda e: canvas.itemconfigure(ventana, width=e.width))
         canvas.configure(yscrollcommand=scroll.set)
-
-        def _rueda(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-        canvas.bind_all("<MouseWheel>", _rueda)
+        AppCorrector._activar_rueda(canvas)
 
         canvas.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
@@ -1148,17 +1602,22 @@ class AppCorrector(tk.Tk):
         lbl_valor.configure(text=f"— {etiqueta_valor}")
         self._actualizar_ejemplo_parametro(param_id, v)
 
-    def _reaplicar_filtro_documental(self):
+    def _reaplicar_filtro_documental(self, silencioso: bool = False):
         """Vuelve a correr _filtrar_falsos_positivos sobre los hallazgos crudos
-        de la última revisión con los Ajustes actuales, sin llamar al LLM."""
+        de la última revisión con los Ajustes actuales, sin llamar al LLM.
+
+        `silencioso`: llamado desde el visor al dibujar o borrar una zona de
+        exclusión — ahí no hay que sacar un diálogo si todavía no se ha corrido
+        ninguna revisión, simplemente no hay nada que refiltrar todavía."""
         if not self.hallazgos_crudos:
-            messagebox.showinfo(
-                "Nada que reaplicar",
-                "Corre una revisión primero. Las reglas del grupo 'Espaciado y "
-                "particiones de palabra' se aplican por página durante el análisis, "
-                "así que un cambio ahí necesita una revisión nueva. El resto del "
-                "filtro documental sí se puede reaplicar aquí sin gastar en el LLM.",
-            )
+            if not silencioso:
+                messagebox.showinfo(
+                    "Nada que reaplicar",
+                    "Corre una revisión primero. Las reglas del grupo 'Espaciado y "
+                    "particiones de palabra' se aplican por página durante el análisis, "
+                    "así que un cambio ahí necesita una revisión nueva. El resto del "
+                    "filtro documental sí se puede reaplicar aquí sin gastar en el LLM.",
+                )
             return
 
         antes = len(self.hallazgos_crudos)
@@ -1166,6 +1625,14 @@ class AppCorrector(tk.Tk):
         self.hallazgos = self.motor._filtrar_falsos_positivos(
             list(self.hallazgos_crudos), self.ruta_pdf_analizada
         )
+        self.hallazgos = calcular_bboxes(self.hallazgos, self.ruta_pdf_analizada)
+        antes_zonas = len(self.hallazgos)
+        self.hallazgos = aplicar_zonas_exclusion(self.hallazgos, self.zonas_exclusion)
+        if len(self.hallazgos) != antes_zonas:
+            self._log(
+                f"Zonas de exclusión: {antes_zonas - len(self.hallazgos)} hallazgo(s) "
+                "descartado(s) por caer dentro de una zona."
+            )
         self._log(
             f"Filtro reaplicado con los Ajustes actuales: {len(self.hallazgos)}/{antes} "
             "hallazgos conservados (sin gastar en el LLM).",
@@ -1296,8 +1763,44 @@ class AppCorrector(tk.Tk):
 
     def _elegir_pdf(self):
         ruta = filedialog.askopenfilename(filetypes=[("PDF", "*.pdf"), ("Todos", "*.*")])
-        if ruta:
-            self.ruta_pdf.set(ruta)
+        if not ruta:
+            return
+        # Las zonas de exclusión se dibujaron sobre OTRO documento: sus
+        # coordenadas no significan nada en este. Revisar dos veces el mismo
+        # archivo, en cambio, las conserva (mismo criterio que la web).
+        if ruta != self.ruta_pdf.get().strip():
+            if self.zonas_exclusion:
+                self._log("PDF nuevo: se descartan las zonas de exclusión del anterior.", "warn")
+            self.zonas_exclusion = {}
+            self._hallazgo_visor = None
+            self._limpiar_enlaces()
+            self._cerrar_visor()
+        self.ruta_pdf.set(ruta)
+
+    def _cerrar_visor(self):
+        if self.visor is not None:
+            self.visor.cerrar()
+            self.visor = None
+        self.visor_ruta = ""
+        self.visor_pagina = 1
+        self._img_pagina = None
+        self.canvas_visor.delete("all")
+        self.canvas_visor.create_text(
+            20,
+            20,
+            anchor="nw",
+            text="Pulsa «Abrir PDF en el visor» para cargar el PDF seleccionado.",
+            fill="#6c7086",
+            font=("Segoe UI", 10),
+        )
+        self.lbl_pagina_visor.configure(text="— / —")
+        self._actualizar_info_zonas()
+
+    def _limpiar_enlaces(self):
+        self.enlaces = []
+        for item in self.tree_enlaces.get_children():
+            self.tree_enlaces.delete(item)
+        self.lbl_enlaces_resumen.configure(text="", foreground="#6c7086")
 
     def _construir_proveedor(self) -> ProveedorLLM:
         sel = self.proveedor_sel.get()
@@ -1527,7 +2030,17 @@ class AppCorrector(tk.Tk):
                         f"Tras filtro documental: {len(self.hallazgos)} hallazgos "
                         f"({antes_fp - len(self.hallazgos)} descartados)"
                     )
-                    self.after(0, lambda: self._refrescar_tabla())
+                # Ubicar cada hallazgo en la página (bbox) permite resaltarlo en
+                # el visor y decidir si cae dentro de una zona de exclusión.
+                self.hallazgos = calcular_bboxes(self.hallazgos, ruta)
+                antes_zonas = len(self.hallazgos)
+                self.hallazgos = aplicar_zonas_exclusion(self.hallazgos, self.zonas_exclusion)
+                if len(self.hallazgos) != antes_zonas:
+                    self._log(
+                        f"Zonas de exclusión: {antes_zonas - len(self.hallazgos)} hallazgo(s) "
+                        "descartado(s) por caer dentro de una zona."
+                    )
+                self.after(0, lambda: self._refrescar_tabla())
                 self._generar_entregables(ruta)
 
             self._prog(total, total, f"Completado — {len(self.hallazgos)} hallazgos")

@@ -20,6 +20,12 @@ extracción de PDF, filtro de falsos positivos, generación de entregables) y el
 mismo `config_filtro.json` de ajustes — lo que desactivas en una se refleja en la
 otra.
 
+**Se mantienen a la par en funcionalidad**: visor de PDF con zonas de exclusión
+dibujables, verificación de enlaces en vivo, ajustes de filtrado con sliders y
+ejemplo en vivo, y detectores deterministas de repetición están en las dos. Una
+feature nueva no se da por terminada hasta que existe en ambas; si es lógica de
+negocio, va a `motor.py` y las dos la heredan sin duplicar código.
+
 ## Instalar
 
 Python ≥ 3.11. `tkinter` viene con la instalación estándar de Python en Windows

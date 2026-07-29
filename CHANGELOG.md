@@ -1,5 +1,48 @@
 # CHANGELOG — RevisorEditorialPDF
 
+## 2026-07-29
+
+### Paridad de escritorio cerrada: visor con zonas de exclusión y enlaces en vivo
+
+Las dos features que la interfaz web tenía desde el 16-17 de julio y la de
+escritorio no. Toda la lógica nueva vive en `motor.py` (la convención del
+proyecto); en Tkinter solo se añadió la interfaz.
+
+- **Pestaña «▦ Visor y zonas»** en `corrector_editorial.py`: renderiza el PDF
+  página a página con navegación y zoom, dibuja zonas de exclusión
+  arrastrando el ratón y las borra con clic derecho. Un doble clic sobre una
+  fila de Hallazgos salta a su página con el fragmento resaltado — el
+  equivalente del «clic para ver» de la web.
+- **Pestaña «🔗 Enlaces»**: verificación HTTP real de las URLs del documento
+  en un hilo de fondo, con el mismo código de estados que la web
+  (ok / roto / sin respuesta / no verificable) y doble clic para abrir.
+- **`calcular_bboxes` + `aplicar_zonas_exclusion` cableados en el pipeline de
+  escritorio**, tanto al terminar una revisión como al reaplicar el filtro.
+  Faltaban por completo: la app de escritorio nunca ubicaba los hallazgos en
+  la página, así que no podía ni resaltarlos ni excluirlos por zona.
+- **`motor.py` gana tres piezas compartidas**: `VisorPDF` (mantiene el
+  documento abierto entre páginas y devuelve PPM, que `tk.PhotoImage` lee
+  directo — así el visor de escritorio no necesita Pillow ni engorda el
+  `.exe`), `rect_a_puntos_pdf` (rectángulo de pantalla → puntos PDF,
+  normalizando el arrastre y recortando a la página) e
+  `indice_zona_en_punto`.
+- **`verificar_enlaces_pdf` extraída a `motor.py`**: el paso completo
+  (extraer URLs → verificar → ordenar por primera página → resumir en el log)
+  estaba dentro de `servidor_web.py`. Ahora las dos interfaces llaman a la
+  misma función en vez de duplicarla.
+- **Las zonas ya no se pierden al revisar dos veces el mismo PDF** (web y
+  escritorio): se descartan solo cuando el documento cambia, que es cuando
+  sus coordenadas dejan de significar algo. Delimitar cornisas y pies es
+  trabajo manual del usuario y no debía tirarse por cambiar de proveedor o de
+  ajustes.
+- Bug de la rueda del ratón corregido de paso: `_frame_desplazable` la ataba
+  con `bind_all`, así que el último Canvas construido se quedaba con la rueda
+  de toda la aplicación. Ahora cada Canvas la escucha solo mientras el puntero
+  está encima — sin esto, el visor nuevo no habría respondido a la rueda.
+- +22 tests (212 en total), incluidos los casos de borde del arrastre: clic
+  suelto que no debe crear zona, arrastre invertido, y recorte al borde del
+  papel.
+
 ## 2026-07-19 (2)
 
 ### 4 detectores deterministas de repetición (paridad de detección con Errata)
