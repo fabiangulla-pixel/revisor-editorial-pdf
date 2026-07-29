@@ -17,6 +17,7 @@ from motor import (  # noqa: E402
     aplicar_zonas_exclusion,
     indice_zona_en_punto,
     rect_a_puntos_pdf,
+    ruta_perfil_estilo,
     verificar_enlaces_pdf,
 )
 
@@ -196,6 +197,42 @@ def test_verificar_enlaces_pdf_sin_urls(monkeypatch):
     mensajes = []
     assert verificar_enlaces_pdf("x.pdf", log_callback=lambda m, n="info": mensajes.append(m)) == []
     assert any("No se encontraron URLs" in m for m in mensajes)
+
+
+def test_perfil_prefiere_la_ruta_personal(monkeypatch, tmp_path):
+    personal = tmp_path / "personal.md"
+    personal.write_text("# perfil personal", encoding="utf-8")
+    (tmp_path / "estilo_gulla.md").write_text("# copia junto al programa", encoding="utf-8")
+    monkeypatch.setattr(motor, "PERFIL_PERSONAL", personal)
+    assert ruta_perfil_estilo(tmp_path) == personal
+
+
+def test_perfil_cae_al_que_esta_junto_al_programa(monkeypatch, tmp_path):
+    # PC de otra persona con el .exe compartido: la unidad I: no existe, pero
+    # un estilo_gulla.md al lado del ejecutable sí debe usarse.
+    monkeypatch.setattr(motor, "PERFIL_PERSONAL", tmp_path / "no_existe" / "estilo_gulla.md")
+    junto = tmp_path / "estilo_gulla.md"
+    junto.write_text("# perfil repartido con el exe", encoding="utf-8")
+    assert ruta_perfil_estilo(tmp_path) == junto
+
+
+def test_perfil_devuelve_none_si_no_hay_ninguno(monkeypatch, tmp_path):
+    monkeypatch.setattr(motor, "PERFIL_PERSONAL", tmp_path / "no_existe.md")
+    assert ruta_perfil_estilo(tmp_path) is None
+    assert ruta_perfil_estilo(None) is None
+
+
+def test_perfil_sobrevive_a_unidad_de_red_caida(monkeypatch, tmp_path):
+    # Si comprobar la ruta personal lanza OSError (Google Drive desconectado),
+    # no debe tumbar el arranque: se sigue con el siguiente candidato.
+    class _RutaQueFalla(type(tmp_path)):
+        def exists(self):
+            raise OSError("unidad no disponible")
+
+    monkeypatch.setattr(motor, "PERFIL_PERSONAL", _RutaQueFalla(tmp_path / "personal.md"))
+    junto = tmp_path / "estilo_gulla.md"
+    junto.write_text("# respaldo", encoding="utf-8")
+    assert ruta_perfil_estilo(tmp_path) == junto
 
 
 def test_verificar_enlaces_resume_los_rotos_en_el_log(monkeypatch):

@@ -51,6 +51,7 @@ from motor import (
     calcular_bboxes,
     generar_informes,
     generar_xfdf,
+    ruta_perfil_estilo,
     verificar_enlaces_pdf,
 )
 
@@ -69,8 +70,6 @@ else:
 WEB_DIR = ASSETS_DIR / "web"
 SUBIDAS_DIR = BASE_DIR / "_subidas_web"
 SUBIDAS_DIR.mkdir(exist_ok=True)
-
-PERFIL_GULLA = Path(r"I:\Mi unidad\00_Programas y macros\Aprendiz de estilos\estilo_gulla.md")
 
 PROVEEDORES = ["ollama", "openai", "gemini", "claude", "perplexity"]
 
@@ -123,10 +122,20 @@ class EstadoServidor:
         self._cargar_config_filtro()
 
         self.perfil = PerfilEstilo()
-        if PERFIL_GULLA.exists():
-            ok, _ = self.perfil.cargar(str(PERFIL_GULLA))
+        # Ruta personal del autor y, si no está (típico en el PC de otra
+        # persona con el .exe compartido), un estilo_gulla.md junto al
+        # programa — ver motor.ruta_perfil_estilo.
+        ruta_perfil = ruta_perfil_estilo(BASE_DIR)
+        if ruta_perfil is not None:
+            ok, _ = self.perfil.cargar(str(ruta_perfil))
             if ok:
-                self._log(f"Perfil de estilo cargado automáticamente: {PERFIL_GULLA.name}", "ok")
+                self._log(f"Perfil de estilo cargado automáticamente: {ruta_perfil.name}", "ok")
+        else:
+            self._log(
+                "Sin perfil de estilo: se usarán criterios editoriales genéricos. "
+                "Copia estilo_gulla.md junto al programa para activarlo.",
+                "warn",
+            )
 
         self.autor = "Corrector IA"
         # En modo público cada visitante trae su propia key: nunca se

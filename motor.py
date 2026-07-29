@@ -1199,6 +1199,32 @@ def generar_xfdf(ruta_original: str, hallazgos: list, ruta_salida: str, autor: s
         f.write(xml_bonito)
 
 
+PERFIL_PERSONAL = Path(r"I:\Mi unidad\00_Programas y macros\Aprendiz de estilos\estilo_gulla.md")
+
+
+def ruta_perfil_estilo(base_dir: Path | None = None) -> Path | None:
+    """Primer perfil de estilo disponible, o None si no hay ninguno.
+
+    Busca en dos sitios y en este orden: la ruta personal del autor (su
+    unidad de Google Drive) y un `estilo_gulla.md` junto al programa. El
+    segundo existe para cuando el `.exe` se comparte con otra persona: en su
+    PC la unidad I: no existe, y sin este respaldo la app se le quedaba en
+    criterios genéricos sin decir por qué — justo lo que distingue a esta
+    herramienta de un corrector cualquiera. Basta con copiar el .md al lado
+    del ejecutable; compartir o no el perfil sigue siendo una decisión
+    explícita de quien lo reparte."""
+    candidatos = [PERFIL_PERSONAL]
+    if base_dir is not None:
+        candidatos.append(Path(base_dir) / "estilo_gulla.md")
+    for ruta in candidatos:
+        try:
+            if ruta.exists():
+                return ruta
+        except OSError:
+            continue  # unidad de red desconectada: probar el siguiente
+    return None
+
+
 def calcular_bboxes(hallazgos: list, ruta_pdf: str) -> list:
     """Añade `bbox: [x0, y0, x1, y1]` (puntos PDF, origen arriba-izquierda,
     igual convención que page.get_pixmap()) a cada hallazgo cuyo fragmento se

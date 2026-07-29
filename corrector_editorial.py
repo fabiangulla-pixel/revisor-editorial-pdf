@@ -47,6 +47,7 @@ from motor import (  # noqa: E402
     generar_xfdf,
     indice_zona_en_punto,
     rect_a_puntos_pdf,
+    ruta_perfil_estilo,
     verificar_enlaces_pdf,
 )
 
@@ -344,22 +345,36 @@ class AppCorrector(tk.Tk):
             self.txt_fragmentos_malsonantes.delete("1.0", "end")
 
     def _cargar_perfil_gulla_automatico(self):
-        """Carga el perfil de FAGV automáticamente si existe."""
-        PERFIL_GULLA = Path(
-            r"I:\Mi unidad\00_Programas y macros\Aprendiz de estilos\estilo_gulla.md"
-        )
+        """Carga el perfil de estilo automáticamente si existe — en la ruta
+        personal del autor o junto al programa (ver motor.ruta_perfil_estilo)."""
         try:
-            if not PERFIL_GULLA.exists():
-                self._log(f"Perfil automático no encontrado: {PERFIL_GULLA}", "warn")
+            ruta_perfil = ruta_perfil_estilo(self._directorio_base())
+            if ruta_perfil is None:
+                self._log(
+                    "Perfil automático no encontrado. Cárgalo a mano desde «Perfil de estilo», "
+                    "o copia estilo_gulla.md junto al programa.",
+                    "warn",
+                )
                 return
-            ok, msg = self.perfil.cargar(str(PERFIL_GULLA))
+            ok, msg = self.perfil.cargar(str(ruta_perfil))
             if ok:
                 self._actualizar_ui_perfil()
-                self._log(f"Perfil de estilo cargado automáticamente: {PERFIL_GULLA.name}", "ok")
+                self._log(f"Perfil de estilo cargado automáticamente: {ruta_perfil.name}", "ok")
             else:
                 self._log(f"Error al cargar perfil automático: {msg}", "warn")
         except Exception as e:
             self._log(f"Error inesperado al cargar perfil: {e}", "error")
+
+    @staticmethod
+    def _directorio_base() -> Path:
+        """Carpeta del programa: la del .exe cuando está empaquetado (no la
+        temporal de extracción de PyInstaller, que se borra al cerrar)."""
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent
+        try:
+            return Path(__file__).resolve().parent
+        except NameError:
+            return Path.cwd()
 
     def _cargar_keys_env(self):
         self.key_openai.set(os.getenv("OPENAI_API_KEY", ""))
