@@ -13,6 +13,17 @@ for _pkg in ('fitz', 'openai', 'google.generativeai', 'anthropic'):
     tmp_ret = collect_all(_pkg)
     datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
+# Ver el comentario extenso en RevisorWebPDF.spec: los SDK de IA declaran
+# integraciones opcionales que el análisis estático de PyInstaller sigue igual,
+# y en este PC eso arrastraba torch/tensorflow/onnxruntime/scipy/pandas al
+# ejecutable. Ninguna ruta de código de motor.py los importa.
+EXCLUIR_PILA_ML = [
+    'torch', 'torchvision', 'torchaudio', 'tensorflow', 'tensorboard',
+    'onnxruntime', 'transformers', 'sentence_transformers', 'sklearn',
+    'scipy', 'numba', 'llvmlite', 'matplotlib', 'pandas', 'openpyxl',
+    'sympy', 'cv2', 'IPython', 'jupyter', 'notebook', 'nbformat', 'pytest',
+]
+
 
 a = Analysis(
     ['corrector_editorial.py'],
@@ -23,7 +34,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=EXCLUIR_PILA_ML,
     noarchive=False,
     optimize=0,
 )

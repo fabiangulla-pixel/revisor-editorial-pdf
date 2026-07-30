@@ -16,6 +16,39 @@ for _pkg in ("fitz", "openai", "google.generativeai", "anthropic"):
     binaries += tmp_ret[1]
     hiddenimports += tmp_ret[2]
 
+# Los SDK de IA declaran integraciones OPCIONALES (numpy/pandas para
+# embeddings, backends de ML) que PyInstaller sigue igual porque el análisis es
+# estático: no distingue una rama perezosa de una que se usa. Como este PC
+# tiene instalada toda la pila científica, el .exe acababa arrastrando torch,
+# tensorflow, onnxruntime, scipy, pandas y numba — 647 MB para una app que solo
+# manda texto por HTTP y escribe PDF. Nada de esto se importa en ninguna ruta
+# de código de motor.py; excluirlo es lo que hace que el ejecutable se pueda
+# compartir por correo o Drive sin sufrir.
+EXCLUIR_PILA_ML = [
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "tensorflow",
+    "tensorboard",
+    "onnxruntime",
+    "transformers",
+    "sentence_transformers",
+    "sklearn",
+    "scipy",
+    "numba",
+    "llvmlite",
+    "matplotlib",
+    "pandas",
+    "openpyxl",
+    "sympy",
+    "cv2",
+    "IPython",
+    "jupyter",
+    "notebook",
+    "nbformat",
+    "pytest",
+]
+
 
 a = Analysis(
     ["servidor_web.py"],
@@ -26,7 +59,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=EXCLUIR_PILA_ML + ["tkinter"],
     noarchive=False,
     optimize=0,
 )

@@ -1,5 +1,53 @@
 # CHANGELOG — RevisorEditorialPDF
 
+## 2026-07-29 (2)
+
+### El `.exe` baja de 647 MB a 95 MB, y dos bugs que salieron al verificarlo
+
+Al preparar el envío de la versión web a otra persona, 647 MB por correo o
+Drive era el obstáculo real. El log de PyInstaller destapó la causa: los
+`collect_all` de los SDK de IA arrastraban **torch, tensorflow, onnxruntime,
+scipy, pandas, numba y llvmlite** al ejecutable. Ninguno se importa en
+ninguna ruta de código del proyecto: aparecen porque esos SDK declaran
+integraciones opcionales (numpy/pandas para embeddings, backends de ML) y el
+análisis de PyInstaller es estático — no distingue una rama perezosa que nunca
+se ejecuta de una que sí. Como este PC tiene toda la pila científica
+instalada, entraba entera.
+
+- `excludes` explícitos en los dos `.spec` (lista `EXCLUIR_PILA_ML`):
+  **RevisorWebPDF 647 → 95 MB, RevisorEditorialPDF 647 → 98 MB** (−85 %).
+- Verificado, no supuesto: se arrancó el `.exe` recién compilado en modo
+  público y se lanzó una revisión con clave falsa por cada proveedor. Los
+  cuatro SDK responden con error de autenticación real (401 de OpenAI,
+  `invalid x-api-key` de Anthropic, «API key not valid» de Google, 401 de
+  Perplexity) y no con `ModuleNotFoundError`, que es lo que habría delatado un
+  paquete cortado de más. También se comprobaron el login, el aislamiento sin
+  cookie, `index.html` y PDF.js empaquetados, la subida de PDF, la estimación
+  de costo, las zonas de exclusión y la verificación de enlaces.
+
+Dos defectos reales encontrados por esa verificación:
+
+- **Los SDK de IA no estaban en `requirements.txt`** (solo PyMuPDF, requests y
+  python-dotenv). En local no se notaba porque están instalados a mano, pero
+  el despliegue de Render corre `pip install -r requirements.txt`: allí
+  cualquier visitante que pegara una key de OpenAI, Gemini o Claude se habría
+  encontrado con `ModuleNotFoundError`, y solo habría funcionado Perplexity
+  (que va por HTTP con `requests`). El despliegue público habría nacido roto.
+- **Ollama seguía anunciándose en modo público.** El README y el CHANGELOG del
+  17-jul afirmaban que no, pero el filtro estaba solo en el frontend
+  (`app.js`): la API seguía devolviéndolo en `/api/proveedores` y aceptándolo
+  en `construir_proveedor`, que intentaría hablar con un Ollama inexistente en
+  el servidor remoto y fallaría con un «no responde» desconcertante. Ahora se
+  filtra en el servidor y se rechaza con un mensaje que explica por qué.
+  +3 tests.
+
+- `compilar.bat` y `compilar_web.bat`: `--clean` obligatorio (sin él
+  PyInstaller reutiliza análisis viejos y ya salió un `.exe` con código de una
+  versión anterior) y copia a los dos destinos. Antes cada script actualizaba
+  solo uno, y la otra copia quedaba semanas atrasada sin que nada lo delatara
+  — el `RevisorEditorialPDF.exe` de `Mis Apps` llevaba cuatro días de retraso
+  frente al del Escritorio.
+
 ## 2026-07-29
 
 ### Paridad de escritorio cerrada: visor con zonas de exclusión y enlaces en vivo

@@ -3,3 +3,13 @@
 PyMuPDF>=1.27
 requests>=2.31
 python-dotenv>=1.0
+
+# SDK de los proveedores de IA. motor.py los importa de forma diferida dentro
+# de cada clase de proveedor, así que el programa arranca sin ellos — pero en
+# cuanto se elige OpenAI, Gemini o Claude hacen falta de verdad. En el
+# despliegue de Render son imprescindibles: cada visitante trae su propia
+# clave y sin estos paquetes solo funcionaría Perplexity (que va por HTTP con
+# `requests`) y los demás fallarían con ModuleNotFoundError.
+openai>=2.30
+anthropic>=0.89
+google-generativeai>=0.8.6

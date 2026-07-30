@@ -207,3 +207,34 @@ def test_modo_publico_reporta_flag_y_no_persiste_key_a_env(servidor_publico, tmp
 
     s.post(f"{servidor_publico}/api/config", json={"key_openai": "sk-secreta-de-un-visitante"})
     assert not (tmp_path / ".env").exists()
+
+
+def test_modo_publico_no_ofrece_ollama(servidor_publico):
+    # Ollama es un modelo LOCAL: en un servidor remoto no hay ninguno
+    # escuchando. Antes solo lo escondía el frontend y la API lo seguía
+    # anunciando (lo detectó la verificación del .exe en modo público).
+    s = requests.Session()
+    s.post(f"{servidor_publico}/api/login", json={"password": "clave-de-prueba"})
+    proveedores = s.get(f"{servidor_publico}/api/proveedores").json()["proveedores"]
+    assert "ollama" not in proveedores
+    assert {"openai", "gemini", "claude", "perplexity"} <= set(proveedores)
+
+
+def test_modo_publico_rechaza_construir_ollama(monkeypatch):
+    # Defensa en el servidor, no solo en la interfaz: pedir Ollama por API debe
+    # decir por qué no se puede, no fallar con un "no responde" desconcertante.
+    monkeypatch.setattr(sw, "MODO_PUBLICO", True)
+    estado = sw.EstadoServidor.__new__(sw.EstadoServidor)
+    estado.modelos = {"ollama": "llama3.1"}
+    estado.api_keys = {}
+    with pytest.raises(ValueError, match="local"):
+        estado.construir_proveedor("ollama")
+
+
+def test_modo_local_si_ofrece_ollama(monkeypatch, tmp_path):
+    monkeypatch.setattr(sw, "MODO_PUBLICO", False)
+    estado = sw.EstadoServidor.__new__(sw.EstadoServidor)
+    estado.modelos = {"ollama": "llama3.1"}
+    estado.api_keys = {}
+    proveedor = estado.construir_proveedor("ollama")
+    assert proveedor.modelo == "llama3.1"

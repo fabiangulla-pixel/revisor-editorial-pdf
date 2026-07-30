@@ -211,6 +211,15 @@ class EstadoServidor:
         proveedor_id = (proveedor_id or "ollama").lower()
         modelo = self.modelos.get(proveedor_id, "")
         if proveedor_id == "ollama":
+            # En un servidor remoto no hay ningún Ollama escuchando: intentarlo
+            # daría un error de conexión desconcertante ("no responde") en vez
+            # de decir la verdad. El frontend ya no ofrece la opción, pero la
+            # API no debe aceptar lo que no puede servir.
+            if MODO_PUBLICO:
+                raise ValueError(
+                    "Ollama no está disponible en el servidor público: es un modelo local. "
+                    "Elige OpenAI, Gemini, Claude o Perplexity con tu propia API key."
+                )
             return OllamaLocal(modelo=modelo or "llama3.1")
         clases = {
             "openai": (OpenAIProveedor, "OpenAI", "openai"),
@@ -588,9 +597,13 @@ class ManejadorAPI(BaseHTTPRequestHandler):
         if ruta == "/api/proveedores":
             from costos import MODELOS_DISPONIBLES, MODELOS_OLLAMA_SUGERIDOS
 
+            # Ollama es un modelo LOCAL: en el despliegue público no existe, así
+            # que no se anuncia. Antes solo lo escondía el frontend (app.js) y
+            # la API seguía ofreciéndolo.
+            proveedores = [p for p in PROVEEDORES if not (MODO_PUBLICO and p == "ollama")]
             return self._json(
                 {
-                    "proveedores": PROVEEDORES,
+                    "proveedores": proveedores,
                     "modelos_disponibles": MODELOS_DISPONIBLES,
                     "modelos_ollama_sugeridos": MODELOS_OLLAMA_SUGERIDOS,
                     "modelo_actual": self.estado.modelos,
