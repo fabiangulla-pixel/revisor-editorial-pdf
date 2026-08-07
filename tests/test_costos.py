@@ -22,6 +22,23 @@ def test_precios_clave():
     assert PRECIOS["sonar-pro"].input_por_millon == 3.00
 
 
+def test_gpt56_catalogado_y_no_cae_en_cota_superior():
+    """Regresión: sin catalogar, gpt-5.6-luna se cobraba a precio de sol."""
+    from costos import _precio_de
+
+    luna, catalogado = _precio_de("gpt-5.6-luna")
+    assert catalogado is True
+    assert (luna.input_por_millon, luna.output_por_millon) == (0.20, 1.20)
+
+    terra, _ = _precio_de("gpt-5.6-terra")
+    assert (terra.input_por_millon, terra.output_por_millon) == (2.00, 12.00)
+
+    # Un id sin nivel se cobra como el más caro de la familia.
+    generico, catalogado = _precio_de("gpt-5.6")
+    assert catalogado is True
+    assert generico.output_por_millon == 30.00
+
+
 def test_modelo_default_por_proveedor():
     assert MODELO_DEFAULT["claude"] == "claude-sonnet-4-6"
     # gpt-4o quedó descontinuado; el default de OpenAI es la familia GPT-5.4.

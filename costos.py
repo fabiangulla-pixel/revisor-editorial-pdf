@@ -17,6 +17,8 @@ Precios (USD por 1M de tokens), verificados en la web el 2026-06-30:
 - OpenAI: gpt-5.5 $5/$30, gpt-5.4 $2.50/$15 (por defecto), gpt-5.4-mini $0.50/$3,
   gpt-5.4-nano $0.20/$1.25. ¡OJO! gpt-4o quedó DESCONTINUADO (sucedido por la
   familia GPT-5.4/5.5); se conserva abajo solo como respaldo histórico.
+  Familia gpt-5.6 (recorte del 30-jul-2026): sol $5/$30, terra $2/$12,
+  luna $0.20/$1.20.
 - Gemini: 3-pro $2/$12, 3.5-flash $1.50/$9, 2.5-pro $1.25/$10, 2.5-flash
   $0.30/$2.50 (por defecto), 2.5-flash-lite $0.10/$0.40. ¡OJO! 2.0-flash y
   1.5-flash quedaron DESCONTINUADOS (2.0-flash se apagó el 1-jun-2026); se
@@ -31,7 +33,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-PRECIOS_VERIFICADOS_EL = "2026-06-30"
+PRECIOS_VERIFICADOS_EL = "2026-08-07"
 CARACTERES_POR_TOKEN = 4.0
 # Recargo aproximado por request de Perplexity (tarifa de búsqueda media).
 PERPLEXITY_FEE_POR_REQUEST = 0.010
@@ -50,7 +52,13 @@ PRECIOS: dict[str, PrecioModelo] = {
     "claude-opus-4-7": PrecioModelo(5.00, 25.00),
     "claude-sonnet-4-6": PrecioModelo(3.00, 15.00),
     "claude-haiku-4-5": PrecioModelo(1.00, 5.00),
-    # OpenAI (vigentes — familia GPT-5.5/5.4)
+    # OpenAI (vigentes — familia GPT-5.6/5.5/5.4)
+    # gpt-5.6 llegó con el recorte del 30-jul-2026 y se ofrece en tres niveles.
+    # Un id sin nivel se cobra como el más caro: nunca subestimar el gasto.
+    "gpt-5.6-sol": PrecioModelo(5.00, 30.00),
+    "gpt-5.6-terra": PrecioModelo(2.00, 12.00),
+    "gpt-5.6-luna": PrecioModelo(0.20, 1.20),
+    "gpt-5.6": PrecioModelo(5.00, 30.00),
     "gpt-5.5": PrecioModelo(5.00, 30.00),
     "gpt-5.4-nano": PrecioModelo(0.20, 1.25),
     "gpt-5.4-mini": PrecioModelo(0.50, 3.00),
@@ -86,9 +94,17 @@ MODELO_DEFAULT = {
 }
 
 # Catálogo de modelos VIGENTES ofrecidos en la GUI por proveedor (el primero es el
-# por defecto). Se listan de más capaz/caro a más barato. Verificados 2026-06-30.
+# por defecto). Se listan de más capaz/caro a más barato. Verificados 2026-08-07.
 MODELOS_DISPONIBLES = {
-    "openai": ["gpt-5.4", "gpt-5.5", "gpt-5.4-mini", "gpt-5.4-nano"],
+    "openai": [
+        "gpt-5.4",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.5",
+        "gpt-5.4-mini",
+        "gpt-5.6-luna",
+        "gpt-5.4-nano",
+    ],
     "gemini": [
         "gemini-2.5-flash",
         "gemini-3-pro",

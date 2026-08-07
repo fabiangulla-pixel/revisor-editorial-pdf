@@ -1,5 +1,25 @@
 # CHANGELOG — RevisorEditorialPDF
 
+## 2026-08-07
+
+### La familia GPT-5.6 entra al catálogo de precios
+
+OpenAI recortó precios el 30-jul-2026 y publicó `gpt-5.6` en tres niveles. Sin
+catalogar, `_precio_de` los mandaba al precio más caro conocido: la regla es
+correcta (nunca subestimar), pero convertía al nivel económico en el que *parece*
+más caro de todos, con una sobreestimación de ~25×.
+
+- `gpt-5.6-sol` $5/$30 · `gpt-5.6-terra` $2/$12 · `gpt-5.6-luna` $0,20/$1,20
+- `gpt-5.6` sin sufijo de nivel se cobra como sol: el identificador no dice qué
+  nivel se va a usar, así que se toma la cota superior.
+- Los tres niveles entran en `MODELOS_DISPONIBLES["openai"]`, ordenados entre los
+  existentes por relación calidad/precio, no al final.
+- `PRECIOS_VERIFICADOS_EL` → 2026-08-07.
+
+El modelo por defecto sigue siendo `gpt-5.4`. **220 pruebas en verde.**
+
+---
+
 ## 2026-07-29 (2)
 
 ### El `.exe` baja de 647 MB a 95 MB, y dos bugs que salieron al verificarlo
